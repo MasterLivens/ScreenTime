@@ -49,7 +49,8 @@
 #define PAGE_LOCK      2
 #define PAGE_SETTINGS  3
 #define PAGE_ADVANCED  4
-#define PAGE_NR        5
+#define PAGE_WARN      5   /* 休息前倒计时提醒（右下角小窗里的一页） */
+#define PAGE_NR        6
 
 #define MARGIN         18
 #define BTN_W          104
@@ -150,6 +151,7 @@ static int      g_topCnt = 0;
 
 static WCHAR    g_reason[256] = L"";
 static WCHAR    g_hint[256]   = L"";
+static int      g_warnDismissed = 0;  /* 用户点过「知道了」后，本次会话不再弹休息提醒 */
 static int      g_bad = 0;
 
 static void SwitchPage(int page);
@@ -1162,6 +1164,120 @@ static void LeaveSettings(void) {
 }
 
 /* ---------------- 页面切换与布局 ---------------- */
+/* ---------------- 休息前倒计时提醒页（AWTK 页面，跨平台） ----------------
+   距离强制休息还剩 warn_minutes 分钟（默认 5）时切到这个页面：
+   右下角那个窗口里显示倒计时，点「知道了」关掉（关掉后本次会话不再弹）。
+   全部用 AWTK 控件实现，没有平台相关代码，将来移植到 Linux 时照旧可用。 */
+static widget_t* g_warnTitle = NULL;
+static widget_t* g_warnBig = NULL;
+static widget_t* g_warnHint = NULL;
+static widget_t* g_warnBtn = NULL;
+static widget_t* g_warnBar = NULL;
+static int g_warnWasHidden = 0;   /* 提醒时把窗口从托盘弹出来了，关掉后要再收回去 */
+static int g_warnOnTop = 0;       /* 提醒期间临时置顶，保证不被别的窗口盖住 */
+
+/* 提醒期间置顶（不抢焦点），结束后恢复普通层级 */
+static void WarnSetTop(int on) {
+  if (g_sdlWnd == NULL || g_warnOnTop == on) return;
+  g_warnOnTop = on;
+  SetWindowPos(g_sdlWnd, on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+static void WarnUpdateCountdown(LONGLONG secs) {
+  WCHAR buf[32];
+  if (g_warnBig == NULL) return;
+  StringCchPrintfW(buf, 32, L"%02lld:%02lld", (secs / 60) % 100, secs % 60);
+  SetTextW(g_warnBig, buf);
+}
+
+static ret_t OnWarnClose(void* ctx, event_t* e) {
+  (void)ctx;
+  (void)e;
+  g_warnDismissed = 1;
+  WarnSetTop(0);
+  SwitchPage(PAGE_STATUS);
+  if (g_warnWasHidden) {
+    g_warnWasHidden = 0;
+    HideToTray(0);
+  }
+  LogEventW(L"用户关闭了休息提醒（本次会话不再弹出）");
+  return RET_OK;
+}
+
+static void BuildWarnPage(void) {
+  widget_t* p = MakePage(STATUS_W, STATUS_H, col(28, 24, 18), 16);
+  g_pages[PAGE_WARN] = p;
+
+  /* 顶部一条琥珀色横条，一眼能看出是"提醒"而不是出错 */
+  g_warnBar = view_create(p, 0, 0, STATUS_W, 4);
+  widget_set_style_color(g_warnBar, "bg_color", col(255, 176, 60));
+
+  g_warnTitle = MakeLabel(p, MARGIN, 18, STATUS_W - 2 * MARGIN, 30, 21, col(255, 196, 110));
+  SetTextW(g_warnTitle, L"马上要休息了");
+
+  g_warnBig = MakeLabel(p, MARGIN, 50, STATUS_W - 2 * MARGIN, 62, 44, col(255, 255, 255));
+  SetTextW(g_warnBig, L"05:00");
+
+  g_warnHint = MakeLabel(p, MARGIN, 116, STATUS_W - 2 * MARGIN, 26, 15, col(196, 186, 168));
+  SetTextW(g_warnHint, L"到点会自动锁屏，先把手头的事收个尾");
+
+  g_warnBtn = MakeButton(p, STATUS_W - MARGIN - 132, STATUS_H - 14 - BTN_H, 132, BTN_H, L"知道了");
+  widget_on(g_warnBtn, EVT_CLICK, OnWarnClose, NULL);
+}
+
+static void ApplyLayoutWarn(int W, int H) {
+  if (g_pages[PAGE_WARN] == NULL) return;
+  widget_move_resize(g_warnBar,   0, 0, W, 4);
+  widget_move_resize(g_warnTitle, MARGIN, 18, W - 2 * MARGIN, 30);
+  widget_move_resize(g_warnBig,   MARGIN, 50, W - 2 * MARGIN, 62);
+  widget_move_resize(g_warnHint,  MARGIN, 116, W - 2 * MARGIN, 26);
+  widget_move_resize(g_warnBtn,   W - MARGIN - 132, H - 14 - BTN_H, 132, BTN_H);
+}
+
+static void WarnTick(void) {
+  static LONGLONG lastSec = -1;
+  LONGLONG remain = g_sessionLenMs - g_usageMs;
+  LONGLONG secs = remain > 0 ? remain / 1000 : 0;
+  int want;
+
+  if (g_warned == 0) {              /* 新会话：允许再次弹出 */
+    g_warnDismissed = 0;
+    lastSec = -1;
+  }
+
+  /* 只从状态页进入；家长验证/设置页面开着的时候不打断用户 */
+  want = (!g_locked && !g_warnDismissed && g_cfg.warn_minutes > 0 && remain > 0 &&
+          remain <= (LONGLONG)g_cfg.warn_minutes * 60000 &&
+          (g_page == PAGE_STATUS || g_page == PAGE_WARN));
+
+  if (!want) {
+    if (g_page == PAGE_WARN) {
+      WarnSetTop(0);
+      SwitchPage(PAGE_STATUS);
+      if (g_warnWasHidden) {
+        g_warnWasHidden = 0;
+        HideToTray(0);
+      }
+    }
+    return;
+  }
+
+  if (g_page != PAGE_WARN) {
+    if (g_hidden) {                 /* 平时藏在托盘里也要弹出来给用户看见 */
+      ShowFromTray();
+      g_warnWasHidden = 1;
+    }
+    WarnSetTop(1);                  /* 临时置顶，免得被浏览器之类的窗口盖住 */
+    SwitchPage(PAGE_WARN);
+    lastSec = -1;
+    LogEventW(L"弹出休息提醒：距离强制休息还剩 %lld 分 %lld 秒", (secs / 60) % 100, secs % 60);
+  }
+  if (secs != lastSec) {            /* 每秒刷新一次倒计时 */
+    lastSec = secs;
+    WarnUpdateCountdown(secs);
+  }
+}
 static void SwitchPage(int page) {
   int i;
   if (page < 0 || page >= PAGE_NR) return;
@@ -1196,6 +1312,7 @@ static void LayoutPage(int page) {
   widget_move_resize(g_pages[PAGE_ADVANCED], 0, 0, ST_W, ST_H);
   ApplyLayoutSettings(ST_W, ST_H);
   ApplyLayoutAdvanced(ST_W, ST_H);
+  ApplyLayoutWarn(W, H);
 
   /* 状态页：三个按钮按窗口宽度均分（左右留 MARGIN，按钮之间留 GAP），
      否则按钮挤在左边、右边空一大块，看着不协调。 */
@@ -1585,6 +1702,7 @@ static ret_t OnTimer(const timer_info_t* info) {
   } else {
     if ((tick & 3) == 1) SessionTick();
     if (((tick + 2) & 3) == 1) RefreshStatus();
+    WarnTick();                       /* 距离休息不足 warn_minutes 时弹倒计时小窗 */
     /* 分辨率/DPI 变了（或用户把窗口拖出屏幕）时把状态窗口重新贴回右下角 */
     if ((tick & 7) == 3 && g_sdlWnd && !g_hidden) {
       RECT rc, wa;
@@ -1633,6 +1751,7 @@ void LockBegin(LONGLONG breakMs, const WCHAR* reason) {
 
   g_wasHidden = g_hidden;
   if (g_hidden) TrayRemove();
+  g_warnOnTop = 0;   /* 锁屏自己会置顶，退出全屏时恢复普通层级 */
 
   /* 如果用户正在设置界面（窗口被放大过），先按状态窗口尺寸收回来再锁屏，
      这样 ExitFullscreen 恢复的才是状态窗口大小，而不是那张大表单的尺寸 */
@@ -1746,6 +1865,7 @@ int UiInit(void) {
   BuildLockPage();
   BuildSettingsPage();
   BuildAdvancedPage();
+  BuildWarnPage();
   SwitchPage(PAGE_STATUS);
   PlaceStatusWindow();
   RefreshStatus();
