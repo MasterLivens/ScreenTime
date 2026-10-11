@@ -383,3 +383,36 @@ legacy\build.ps1      AWTK 之前那版（纯 Win32 窗口 + 无 AWTK 依赖）�
   （stb_truetype 读不了 `.ttc`）。
 * `main_loop_sdl` 收到 `SDL_QUIT` 就会退出 `tk_run()`，所以必须子类化 SDL 窗口
   （`SetWindowLongPtrW(GWLP_WNDPROC, ...)`）把 `WM_CLOSE` / `SC_CLOSE` 吞掉改成“隐藏到托盘”。
+
+## 9. 版本管理（git）
+
+仓库已经初始化好（默认分支 `main`），身份写在**仓库级配置**里（`git config --local`，不动你的全局设置）：
+
+```powershell
+cd D:\Work\ScreenTime
+git status                     # 看改动
+git log --oneline              # 看历史
+git add -A; git commit -m "..."  # 提交
+```
+
+**提交什么**：`src\`、`legacy\`、`tools\`（源码）、`test\`（脚本与测试用 ini）、`installer\`、
+`build.ps1` / `run.ps1` / `awtk_env.ps1` / `install.ps1` / `uninstall.ps1`、`README.md`、`VERSION`、
+`.gitignore` / `.gitattributes` —— 一共 83 个文件，整仓约 140 KiB。
+
+**不提交什么**（见 [.gitignore](D:\Work\ScreenTime\.gitignore)）：
+
+| 忽略项 | 原因 |
+|---|---|
+| `config.dat` / `config.ini` / `config.ini.bak` / `legacy\config.ini` | 里面有密码哈希/盐或加密后的配置，**绝不应该进版本库** |
+| `ScreenTime.exe`、`dist\`、`out\`、`build\`、`*.o`、`tools\*.exe` | 构建产物，能重新生成 |
+| `logs\`、`screenshots\`、`test\logs\`、`test\screenshots\`、`test\verify\`、`test\*.png` | 运行时数据与验证截图（几十 MB） |
+
+其它约定：
+
+* `legacy\config.ini` 已从仓库移除（旧版程序首次运行会自己生成），磁盘上那份如果还在也可以直接删。
+* **AWTK 不进仓库**：`awtk_env.ps1` 里写的是绝对路径 `D:\Work\AWTK\awtk-master`，就地引用其头文件/导入库/资源；
+  换机器时改这一个文件、或把 AWTK 源码放在同样的路径即可（详见 §2）。
+* `.gitattributes` 统一用 LF 存文本、并把 `*.exe/*.dll/*.png/*.dat/*.zip` 标成二进制，
+  避免 Windows/Linux 之间把行尾改来改去、也让 diff 不去碰二进制。
+* 从零开始恢复构建环境：装 MinGW-w64（`D:\w64devkit`）→ 按 §2.2 编译 AWTK → `git clone` 本仓库 →
+  `.\build.ps1` 编译 → `.\install.ps1` 安装（或直接用 `dist\ScreenTimeSetup-<版本>.exe` 安装）。
