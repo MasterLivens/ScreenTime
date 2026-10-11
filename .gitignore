@@ -1,0 +1,48 @@
+# ============================================================
+#  ScreenTime —— 忽略规则
+#  原则：只提交"源码 + 构建脚本 + 文档"，构建产物和运行时数据都不进仓库。
+# ============================================================
+
+# ---------- 构建产物 ----------
+/ScreenTime.exe
+/ScreenTime_old.exe
+/ScreenTime_src.zip
+/build/
+/out/
+/dist/
+*.o
+*.obj
+*.dll
+*.a
+*.lib
+*.exp
+
+# 测试辅助工具的编译产物（源码在 tools/ 下，要保留）
+/tools/*.exe
+/legacy/*.exe
+
+# ---------- 运行时数据（不提交）----------
+# config.dat 是加密配置，config.ini 是老版明文配置（含密码哈希与盐）
+/config.ini
+/config.dat
+/config.ini.bak
+/legacy/config.ini
+/logs/
+/screenshots/
+/.acl-recovery/
+
+# ---------- 测试数据 / 截图 ----------
+/test/logs/
+/test/screenshots/
+/test/verify/
+/test/cmk/
+/test/*.png
+/test/**/b/
+
+# ---------- 编辑器 / 系统杂项 ----------
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini

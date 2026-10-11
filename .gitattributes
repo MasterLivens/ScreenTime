@@ -1,0 +1,20 @@
+# 统一用 LF 存文本，避免 Windows/Linux 之间来回改行尾
+* text=auto eol=lf
+
+# 明确标记二进制，别让 git 去猜（也就不会被当成文本做行尾转换）
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.exe   binary
+*.dll   binary
+*.dat   binary
+*.zip   binary
+*.bin   binary
+
+# NSIS 脚本与 C 源码按 LF 处理
+*.nsi   text eol=lf
+*.c     text eol=lf
+*.h     text eol=lf
+*.ps1   text eol=lf
+*.md    text eol=lf
+*.ini   text eol=lf
