@@ -73,7 +73,7 @@ if (Test-Path $datPath) {
 } elseif (Test-Path (Join-Path $InstallDir 'config.ini')) {
     Write-Host '      plaintext config.ini found: it will be migrated to config.dat on first run'
 } else {
-    Write-Host '      no config yet: config.dat (encrypted, default password 642101) is created on first run'
+    Write-Host '      no config yet: config.dat (encrypted, default password 12345678) is created on first run'
 }
 
 if (-not $NoAutoStart) {

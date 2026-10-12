@@ -65,7 +65,7 @@ foreach ($m in $Modes) {
     Write-Host "unlock click at $clickX,$clickY"
     & $inject focus $targetPid | Out-Null
     & $inject click $clickX $clickY | Out-Null
-    & $inject type '642101' | Out-Null
+    & $inject type '12345678' | Out-Null
     & $inject key 13 | Out-Null
     Start-Sleep -Seconds 2
     Write-Host '--- after unlock ---'

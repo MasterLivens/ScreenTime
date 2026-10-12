@@ -23,7 +23,7 @@ static void Run(const WCHAR *label, DWORD extraStyle)
                                 WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | extraStyle,
                                 10, 10, 150, 26, top, (HMENU)305, wc.hInstance, NULL);
 
-    SetWindowTextW(edit, L"642101");
+    SetWindowTextW(edit, L"12345678");
 
     WCHAR buf[128];
     memset(buf, 0, sizeof(buf));

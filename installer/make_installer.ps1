@@ -36,7 +36,7 @@ $NsisShareDir = 'D:\w64devkit\share\nsis'
 $SevenZipExe  = 'C:\Program Files\7-Zip\7z.exe'
 $AwtkRoot     = 'D:\Work\AWTK\awtk-master'
 
-$DefaultVersion = '1.1.0'
+$DefaultVersion = '1.1.1'
 $ScaleDirs      = @('x1', 'x2', 'x3', 'x4')
 
 # ---------------------------------------------------------------------------

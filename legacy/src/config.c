@@ -133,7 +133,7 @@ int ConfigLoad(Config *c, const WCHAR *path)
     if (c->warn_minutes < 0)      c->warn_minutes = 0;
     if (c->max_image_width < 320) c->max_image_width = 320;
     /* 注意：这里不填默认密码。已有哈希时保持哈希不变，
-       只有在还没有哈希（首次运行）时 ConfigFinalizePassword 才会用默认密码 642101。 */
+       只有在还没有哈希（首次运行）时 ConfigFinalizePassword 才会用默认密码 12345678。 */
     return 1;
 }
 
@@ -310,7 +310,7 @@ int ConfigFinalizePassword(Config *c, const WCHAR *path)
 
     if (c->pw_iterations < 1000)   c->pw_iterations = 1000;
     if (c->pw_iterations > 500000) c->pw_iterations = 500000;
-    if (!c->password[0]) StringCchCopyW(c->password, 64, L"642101");
+    if (!c->password[0]) StringCchCopyW(c->password, 64, L"12345678");
 
     unsigned char salt[16], out[32];
     if (!PwRandomSalt(salt, 16)) return 0;              /* 极端情况：保留明文比较 */

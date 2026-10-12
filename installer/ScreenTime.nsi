@@ -19,10 +19,10 @@ SetCompressor /SOLID lzma
 
 ;--------------------------------------------------------------- 编译期参数 ---
 !ifndef VERSION
-  !define VERSION "1.1.0"
+  !define VERSION "1.1.1"
 !endif
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "1.1.0.0"
+  !define PRODUCT_VERSION "1.1.1.0"
 !endif
 !ifndef PAYLOAD_SRC
   !define PAYLOAD_SRC "D:\Work\ScreenTime"

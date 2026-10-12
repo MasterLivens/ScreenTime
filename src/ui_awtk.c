@@ -39,7 +39,7 @@
 #define BTN_TRAY_SHOW  210
 
 /* 程序版本（和根目录 VERSION 保持一致） */
-#define ST_VERSION     L"1.1.0"
+#define ST_VERSION     L"1.1.1"
 
 #define STATUS_W       470
 #define STATUS_H       240
@@ -1040,14 +1040,22 @@ static int SettingsCommit(int fromAdvanced) {
 
   HooksSetBlockHotkeys(g_cfg.block_hotkeys ? 1 : 0);
 
+  /* 顺序很重要：ConfigSave() 写盘成功后会把 c->password 清零（明文不留在内存里），
+     所以必须先把新的明文密码派生成哈希，再做整体保存。
+     反过来的话明文在到达哈希函数前就被清掉，表现是"保存成功但密码没变"（曾经的真 bug）。 */
+  if (g_cfg.password[0]) {
+    if (!ConfigFinalizePassword(&g_cfg, g_configPath)) {
+      SetMsg(fromAdvanced ? g_aMsg : g_sMsg, L"写入 config.dat 失败");
+      LogEventW(L"家长设置保存失败：无法写入 %s", g_configPath);
+      return 0;
+    }
+    LogEventW(L"解锁密码已通过家长设置更新");
+  }
+
   if (!ConfigSave(&g_cfg, g_configPath)) {
     SetMsg(fromAdvanced ? g_aMsg : g_sMsg, L"写入 config.dat 失败");
     LogEventW(L"家长设置保存失败：无法写入 %s", g_configPath);
     return 0;
-  }
-  if (g_cfg.password[0]) {
-    ConfigFinalizePassword(&g_cfg, g_configPath);
-    LogEventW(L"解锁密码已通过家长设置更新");
   }
 
   sessionChanged = (oldSession != g_cfg.session_minutes) || (oldBreak != g_cfg.break_minutes);

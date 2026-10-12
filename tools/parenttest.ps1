@@ -1,4 +1,4 @@
-param([string]$Pass = '642101', [string]$LogPath = 'D:\Work\ScreenTime\logs\activity.log')
+param([string]$Pass = '12345678', [string]$LogPath = 'D:\Work\ScreenTime\logs\activity.log')
 Add-Type -Path D:\Work\ScreenTime\tools\windowtest.cs
 
 function TextOf([IntPtr]$h) {

@@ -15,7 +15,7 @@
 |---|---|
 | 限时使用 | 默认 **45 分钟**（`session_minutes`），可在程序里的「家长设置」界面改 |
 | 触发后 | 全屏锁屏 + 倒计时，强制休息默认 **15 分钟**（`break_minutes`） |
-| 提前解锁 | 必须输入密码，默认 **642101**；配置文件里**没有明文**，只有 PBKDF2 哈希 |
+| 提前解锁 | 必须输入密码，默认 **12345678**；配置文件里**没有明文**，只有 PBKDF2 哈希 |
 | 密码错误 | 每次追加休息时间（默认 +30 秒），并记录日志；**空密码按回车不算错误**（只提示"请输入密码"） |
 | 提前解锁惩罚 | 没休息完的分钟数会从**这一次解锁后的**可用时长里扣掉（`penalty=1`，最少保留 5 分钟） |
 | 休息结束 | 自动解锁，开始新的计时会话 |
@@ -108,8 +108,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Extra '-DST_PWD
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1
 # 产物：
-#   dist\ScreenTimeSetup-1.1.0.exe        2.4 MB，双中文向导的 NSIS 安装包（含卸载程序）
-#   dist\ScreenTime-1.1.0-portable.zip    2.9 MB，免安装绿色包
+#   dist\ScreenTimeSetup-1.1.1.exe        2.4 MB，双中文向导的 NSIS 安装包（含卸载程序）
+#   dist\ScreenTime-1.1.1-portable.zip    2.9 MB，免安装绿色包
 ```
 
 安装包行为：按用户安装（**不需要管理员权限**）、默认装到 `%LOCALAPPDATA%\ScreenTime`、
@@ -150,7 +150,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.p
 ## 4. 配置（加密存储 + 界面里改）
 
 程序目录下的 **`config.dat`**：AES-256-CBC 加密的二进制文件（文件头 `STCF`），首次运行自动生成
-（默认密码 `642101`），文件属性是 Hidden。**用记事本打开只会看到乱码**，改配置只有两条路：
+（默认密码 `12345678`），文件属性是 Hidden。**用记事本打开只会看到乱码**，改配置只有两条路：
 
 1. 程序里的 **「家长设置」→ 保存**（推荐，所有选项都有界面，见 §4.2）；或
 2. 托盘菜单 →「家长设置（需密码）」→ 同一个界面。
@@ -190,8 +190,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.p
 * 比较密码用 **PBKDF2-HMAC-SHA256（CNG `BCryptDeriveKeyPBKDF2`）+ 16 字节随机盐 + 20000 次迭代**，
   常量时间比较；明文只在内存里存在几毫秒（用完 `SecureZeroMemory` 清零），**永不落盘**。
 * **换密码**：程序里 →「家长设置」→ 输密码进入 → 点 **「识别与密码」** → 在「新密码 / 确认新密码」里各输一遍
-  （至少 4 位，两次必须一致）→ 点「保存」。界面会立刻生成新的哈希写进 `config.dat`。
-* 首次运行且没有哈希时，默认密码就是 `642101`。
+  （至少 4 位，两次必须一致）→ 点「保存」。界面会立刻生成新的哈希写进 `config.dat`，
+  **改完立即生效、不用重启**：存完就能用新密码过家长验证，也能用来解锁。
+* 首次运行且没有哈希时，默认密码就是 `12345678`（想换就在上面那一步改，随时能改）。
 
 ### 4.2 家长设置（配置界面）
 
@@ -276,7 +277,7 @@ logs\activity.jsonl                        # 机读：JSON 行，便于统计
 ## 7. 已知边界
 
 * 这是**自律工具，不是安全边界**：能进任务管理器就能结束它；能改文件就能重置它
-  （比如直接把 `config.dat` 删掉，程序会按默认值重建，密码退回 `642101`）。
+  （比如直接把 `config.dat` 删掉，程序会按默认值重建，密码退回 `12345678`）。
 * `config.dat` 的加密是**防翻看、防随手篡改**级别的：密钥口令编译在 exe 里（每次保存用新的随机盐 + PBKDF2
   派生 AES-256 密钥），所以拿记事本看不到内容、孩子也不能直接改「限时 45 分钟」；但会逆向的人仍能解开。
   它不能替代账户权限——给孩子用标准账户，别用管理员账户。
@@ -373,6 +374,11 @@ legacy\build.ps1      AWTK 之前那版（纯 Win32 窗口 + 无 AWTK 依赖）�
   `WS_VISIBLE`、`dwExStyle` 临时加上 `WS_EX_TOOLWINDOW`（否则任务栏按钮会闪）、`lpcs->x/y` 挪到 -32000；
   窗口建好后立刻 `ShowWindow(SW_HIDE)` **再**做布局（否则 `PlaceStatusWindow()` 挪到右下角那一下照样会被看到），
   最后才按 `start_hidden` 决定是否 `ShowWindow`。实测：3ms 粒度采样 1100+ 次，窗口一次都没出现在屏幕内。
+* **`ConfigSave()` 会清零明文密码字段，所以"改密码"必须先哈希再保存**：
+  `ConfigSave()` 写盘成功后会 `SecureZeroMemory(c->password)`（明文不留在内存里），
+  如果像最初那样先 `ConfigSave(&g_cfg)` 再 `if (g_cfg.password[0]) ConfigFinalizePassword(...)`，
+  明文在到达哈希函数之前就被清掉了——表现是**日志显示"家长设置已保存"但密码根本没变**（静默失效，很难发现）。
+  正确顺序：`if (g_cfg.password[0]) ConfigFinalizePassword(...)`（内部派哈希 + 落盘）→ 再 `ConfigSave()` 保存其余设置。
 * **CNG 的 AES 用法**：`BCryptOpenAlgorithmProvider(BCRYPT_AES_ALGORITHM)` →
   `BCryptSetProperty(BCRYPT_CHAINING_MODE, BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC))` →
   `BCryptGetProperty(BCRYPT_OBJECT_LENGTH)` → `BCryptGenerateSymmetricKey` →

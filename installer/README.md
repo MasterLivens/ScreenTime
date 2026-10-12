@@ -29,21 +29,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer\make_installer.ps1
 脚本会依次：
 
 1. 检查 `makensis.exe`、设置 `NSISDIR`；
-2. 读 `VERSION`（读不到就用 `1.1.0`），并换算成 `X.X.X.X` 供版本资源使用；
+2. 读 `VERSION`（读不到就用 `1.1.1`），并换算成 `X.X.X.X` 供版本资源使用；
 3. 逐个检查要打包的源文件，**缺任何一个就报错退出**（错误信息里写明缺哪个路径）；
 4. 调 makensis 编译，`-1`/非 0 退出码直接报错；
 5. 用 `7z l` 打印安装包内容，并断言 6 类文件都在、且 **不含 config.ini / config.dat**；
 6. 生成便携版 zip（`Compress-Archive`）；
 7. 打印产物完整路径与大小（MB），最后一行打印**可直接复制的 makensis 命令**。
 
-等价的 makensis 命令（版本 1.1.0 时）：
+等价的 makensis 命令（版本 1.1.1 时）：
 
 ```powershell
 & 'D:\w64devkit\bin\makensis.exe' /INPUTCHARSET UTF8 `
-  /DVERSION=1.1.0 /DPRODUCT_VERSION=1.1.0.0 `
+  /DVERSION=1.1.1 /DPRODUCT_VERSION=1.1.1.0 `
   /DPAYLOAD_SRC=D:\Work\ScreenTime `
   /DAWTK_SRC=D:\Work\AWTK\awtk-master `
-  /DOUT_FILE=D:\Work\ScreenTime\dist\ScreenTimeSetup-1.1.0.exe `
+  /DOUT_FILE=D:\Work\ScreenTime\dist\ScreenTimeSetup-1.1.1.exe `
   D:\Work\ScreenTime\installer\ScreenTime.nsi
 ```
 
@@ -75,7 +75,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer\make_installer.ps1
 
 欢迎 → 安装目录 → 安装选项（`开机自动启动` 默认勾选、`安装完成后立即运行` 默认勾选）→ 安装进度 → 完成（完成页可再勾选「立即运行」）。
 
-静默安装：`ScreenTimeSetup-1.1.0.exe /S`（使用默认选项；`/D=路径` 可指定目录，必须是最后一个参数且不加引号）。
+静默安装：`ScreenTimeSetup-1.1.1.exe /S`（使用默认选项；`/D=路径` 可指定目录，必须是最后一个参数且不加引号）。
 
 ### 写入的注册表项（全部在 HKCU）
 

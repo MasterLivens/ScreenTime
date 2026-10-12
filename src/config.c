@@ -357,8 +357,8 @@ int ConfigFinalizePassword(Config *c, const WCHAR *path)
 #endif
         needSave = 1;
     } else if (!c->pw_hash[0] || !c->pw_salt[0]) {
-        /* 首次运行还没有哈希：用默认密码 642101 */
-        StringCchCopyW(c->password, 64, L"642101");
+        /* 首次运行还没有哈希：用默认密码 12345678 */
+        StringCchCopyW(c->password, 64, L"12345678");
         return ConfigFinalizePassword(c, path);
     }
 
