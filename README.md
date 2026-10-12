@@ -108,13 +108,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Extra '-DST_PWD
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1
 # 产物：
-#   dist\ScreenTimeSetup-1.1.1.exe        2.4 MB，双中文向导的 NSIS 安装包（含卸载程序）
+#   dist\ScreenTimeSetup-1.1.1.exe        4.1 MB，Inno Setup 7 做的安装包（含卸载程序）
 #   dist\ScreenTime-1.1.1-portable.zip    2.9 MB，免安装绿色包
 ```
 
 安装包行为：按用户安装（**不需要管理员权限**）、默认装到 `%LOCALAPPDATA%\ScreenTime`、
-可选「开机自动启动」与「安装完立即运行」、写开始菜单快捷方式、注册到「应用和功能」里可以正常卸载
-（卸载时会问是否连截图/日志/配置一起删）。安装包是 **64 位**的（只带 amd64 的 NSIS 组件），32 位 Windows 装不了。
+升级时沿用原目录且**不会动** `screenshots\logs\config.dat`、可选「开机自动启动」与「桌面快捷方式」、
+写开始菜单快捷方式、注册到「应用和功能」里可以正常卸载（交互式卸载会问是否连截图/日志/配置一起删，
+静默卸载一律保留个人数据）。安装包是 **64 位**的（程序本体与两个 DLL 都是 64 位），32 位 Windows 装不了。
+
+静默安装/卸载与打包脚本细节见 [installer\README.md](D:\Work\ScreenTime\installer\README.md)。
 
 **给本机开发用的脚本**：
 
@@ -299,7 +302,7 @@ VERSION           版本号（安装包与程序内显示都用它）
 build.ps1         gcc 编译 src\*.c -> ScreenTime.exe（-Out 可指定输出路径）
 run.ps1           开发时运行工作区的 exe（把 AWTK 构建目录加进 PATH）
 awtk_env.ps1      AWTK 头文件目录 / 编译宏 / 导入库路径（与 build_mingw 的 build.ninja 对齐）
-installer\        NSIS 安装包：ScreenTime.nsi + make_installer.ps1（打包脚本）+ README.md
+installer\        Inno Setup 7 安装包：ScreenTime.iss（UTF-8 带 BOM）+ make_installer.ps1（纯 ASCII 打包脚本）+ README.md
 dist\             安装包产物：ScreenTimeSetup-<版本>.exe / ScreenTime-<版本>-portable.zip
 src/main.c        入口、会话计时、截图线程（含截图总开关）、单实例、清理过期截图、配置迁移
 src/ui.h          UI 层接口：UiInit / UiRun / UiShutdown / LockBegin / LockEnd / LockIsActive

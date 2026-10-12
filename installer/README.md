@@ -1,115 +1,118 @@
-# ScreenTime 安装包（NSIS）
+# ScreenTime 安装包（Inno Setup 7）
 
 本目录只负责 **打包 / 安装 / 卸载**，不包含任何 C 源码。程序本体在上一级目录（`src\`、`ScreenTime.exe`）。
 
-## 目录内容
+## 文件
 
 | 文件 | 说明 |
 |---|---|
-| `installer\ScreenTime.nsi` | NSIS 安装脚本（**UTF-8 无 BOM**，中文界面，必须用 `/INPUTCHARSET UTF8` 编译） |
-| `installer\make_installer.ps1` | 打包脚本（**纯 ASCII**，PowerShell 5.1 可直接跑；所有输出为英文） |
-| `dist\ScreenTimeSetup-<版本>.exe` | 安装包产物（默认安装到 `%LOCALAPPDATA%\ScreenTime`） |
-| `dist\ScreenTime-<版本>-portable.zip` | 免安装便携版（exe + dll + res，解压即用；配置文件 `config.dat` 会在首次运行时自动生成） |
+| `installer\ScreenTime.iss` | Inno Setup 脚本（**UTF-8 带 BOM**，中文界面；改这个文件改安装包行为） |
+| `installer\make_installer.ps1` | 打包脚本（**纯 ASCII**，见下面"几个坑"） |
+| `installer\ScreenTime.ico` | 可选：放一个图标进来，安装程序/快捷方式就会用它（没有就用 Inno 默认图标） |
+| `dist\ScreenTimeSetup-<版本>.exe` | 安装包产物 |
+| `dist\ScreenTime-<版本>-portable.zip` | 免安装绿色包（exe + 2 个 DLL + 主题 + 指针） |
 
-## 打包（重新打包）
+工具位置：`C:\Program Files\Inno Setup 7\ISCC.exe`（命令行编译器，7.1.0）。
+中文界面用的是 Inno 自带的 `Languages\ChineseSimplified.isl`，不需要额外下载语言包。
 
-C 代码改完、`ScreenTime.exe` 重新编译好之后，在项目根目录执行：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File installer\make_installer.ps1
-```
-
-可选参数：
+## 怎么打包
 
 ```powershell
-# 只做安装包，不做便携版 zip
-powershell -NoProfile -ExecutionPolicy Bypass -File installer\make_installer.ps1 -SkipPortable
+cd D:\Work\ScreenTime
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1
+# 只要安装包、不要绿色包：
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1 -SkipPortable
 ```
 
-脚本会依次：
+脚本做的事：
 
-1. 检查 `makensis.exe`、设置 `NSISDIR`；
-2. 读 `VERSION`（读不到就用 `1.1.1`），并换算成 `X.X.X.X` 供版本资源使用；
-3. 逐个检查要打包的源文件，**缺任何一个就报错退出**（错误信息里写明缺哪个路径）；
-4. 调 makensis 编译，`-1`/非 0 退出码直接报错；
-5. 用 `7z l` 打印安装包内容，并断言 6 类文件都在、且 **不含 config.ini / config.dat**；
-6. 生成便携版 zip（`Compress-Archive`）；
-7. 打印产物完整路径与大小（MB），最后一行打印**可直接复制的 makensis 命令**。
+1. 检查 `ISCC.exe` 是否存在、`.iss` 是否存在；
+2. 读 `VERSION`（读不到用脚本里的默认值），换算成 `X.X.X.Y` 供版本资源使用；
+3. 检查 payload 是否齐全：`ScreenTime.exe`、`awtk.dll`、`SDL2.dll`、`default.bin`、
+   `images\x1..x4\cursor*.png`（缺一个就报错退出）；确认**没有**把 `config.ini`/`config.dat` 打进去；
+4. 检查 `.iss` 是否是 **UTF-8 带 BOM**；**不带 BOM 就自动生成一份带 BOM 的副本再编译**
+   （在 `build\ScreenTime.generated.iss`），不会因为编辑器把 BOM 吃掉而打包失败；
+5. 调 ISCC 编译，非 0 退出码直接报错；
+6. **校验包内载荷**：解析 ISCC 的 `Compressing: <文件>` 输出，确认 4 个程序文件 + 12 个指针图都在、
+   且没有混进任何配置文件；
+7. 打绿色包（`Compress-Archive`），并列出压缩包里的条目；
+8. 打印产物完整路径、大小，最后一行打印**可直接复制的 ISCC 命令**。
 
-等价的 makensis 命令（版本 1.1.1 时）：
+等价的 ISCC 命令（版本 1.1.1 时）：
 
 ```powershell
-& 'D:\w64devkit\bin\makensis.exe' /INPUTCHARSET UTF8 `
-  /DVERSION=1.1.1 /DPRODUCT_VERSION=1.1.1.0 `
-  /DPAYLOAD_SRC=D:\Work\ScreenTime `
-  /DAWTK_SRC=D:\Work\AWTK\awtk-master `
-  /DOUT_FILE=D:\Work\ScreenTime\dist\ScreenTimeSetup-1.1.1.exe `
-  D:\Work\ScreenTime\installer\ScreenTime.nsi
+& 'C:\Program Files\Inno Setup 7\ISCC.exe' `
+    /DAppVersion=1.1.1 /DAppVersion4=1.1.1.0 `
+    /DPayloadDir=D:\Work\ScreenTime `
+    /DAwtkDir=D:\Work\AWTK\awtk-master `
+    /OD:\Work\ScreenTime\dist `
+    D:\Work\ScreenTime\installer\ScreenTime.iss
 ```
 
-可用 `/D` 覆盖的宏：`VERSION`、`PRODUCT_VERSION`、`PAYLOAD_SRC`、`AWTK_SRC`、`OUT_FILE`、`ICON_FILE`（可选图标）。
+`/D` 定义会覆盖 `.iss` 顶部的默认值；`/O` 指定输出目录，`/F` 指定输出文件名（默认由
+`OutputBaseFilename` 决定）。
 
-### 依赖（本机已实测的路径）
+## 安装包行为
 
-- NSIS：`D:\w64devkit\bin\makensis.exe`，Include/Stubs/Plugins 在 `D:\w64devkit\share\nsis\`
-- 打 ZIP：PowerShell 自带 `Compress-Archive`
-- 验证包内容：`C:\Program Files\7-Zip\7z.exe`（没有则跳过该步并告警）
+* **按用户安装，不需要管理员权限**（`PrivilegesRequired=lowest`），默认装到 `%LOCALAPPDATA%\ScreenTime`；
+  升级时沿用上次的目录（`UsePreviousAppDir=yes`）。
+* **只装程序本体 + 界面资源**：`ScreenTime.exe`、`awtk.dll`、`SDL2.dll`、
+  `res\assets\default\raw\styles\default.bin`、`res\...\images\xN\cursor*.png`。
+  不带任何配置文件——`config.dat` 由程序首次运行自己生成；**升级不会动**
+  `screenshots\`、`logs\`、`config.dat`、`config.ini.bak`。
+* **附加选项**（都可以不选）：`开机时自动启动`（默认勾选，写
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ScreenTime`，卸载时自动删除）、
+  `创建桌面快捷方式`（默认不勾）。
+* **开始菜单**：`ScreenTime` 组下有「屏幕使用时间管理」和「卸载 屏幕时间管理」两个快捷方式。
+* **覆盖前先结束正在运行的程序**：`[Code]` 里用 `Exec` + `ewWaitUntilTerminated` 调
+  `taskkill /F /IM ScreenTime.exe`（**不用任何管道/输出重定向**，受限环境里也不会卡住）。
+* **卸载**：交互式卸载会问一次"是否同时删除截图、日志和配置"（默认按钮是「否」）；
+  **静默卸载一律保留**个人数据。
+* 装完的完成页可以勾「立即运行」。
 
-## 安装包装了什么
+### 静默安装 / 卸载
 
-按用户安装（`RequestExecutionLevel user`，HKCU），**不需要管理员权限**，也不会影响其他用户。
+```powershell
+# 静默安装（加 /LOG= 就有完整日志，排查问题时很有用）
+.\dist\ScreenTimeSetup-1.1.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LANG=chinese `
+    /LOG="D:\Work\ScreenTime\build\inno_install.log"
 
-默认安装目录 `%LOCALAPPDATA%\ScreenTime`（安装向导里可以改）：
+# 换目录、不要自启、不要快捷方式
+.\dist\ScreenTimeSetup-1.1.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+    /DIR="D:\some\dir" /NOICONS /TASKS=""
 
-| 安装后相对路径 | 来源 |
-|---|---|
-| `ScreenTime.exe` | `ScreenTime.exe` |
-| `awtk.dll` | `awtk-master\build_mingw\awtk.dll` |
-| `SDL2.dll` | `awtk-master\build_mingw\third_party\SDL2\SDL2.dll` |
-| `res\assets\default\raw\styles\default.bin` | 同路径 |
-| `res\assets\default\raw\images\x1..x4\cursor*.png` | 同路径（每个目录 3 个） |
+# 静默卸载（保留个人数据）
+& "$env:LOCALAPPDATA\ScreenTime\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
 
-**不含任何配置文件**：`config.ini` 不会被安装（项目根目录下那个隐藏的 `config.ini` 只是在开发时用），程序首次运行会在安装目录里生成加密的 `config.dat`。
+常用开关：`/VERYSILENT`（完全无界面）、`/SILENT`（只有进度）、`/SUPPRESSMSGBOXES`、
+`/NORESTART`、`/LANG=chinese`、`/DIR="..."`、`/TASKS="autostart"`、`/NOICONS`、`/LOG="..."`。
 
-### 界面流程（简体中文）
+### 只在验证时用的编译开关
 
-欢迎 → 安装目录 → 安装选项（`开机自动启动` 默认勾选、`安装完成后立即运行` 默认勾选）→ 安装进度 → 完成（完成页可再勾选「立即运行」）。
+`/DNoUninstallKey` 会设 `Uninstallable=no`：**不写 HKCU 的卸载登记表项、也不生成卸载程序**，
+用于在受限环境里只验证"包能否正确解包"。正常打包**不要**加。
 
-静默安装：`ScreenTimeSetup-1.1.1.exe /S`（使用默认选项；`/D=路径` 可指定目录，必须是最后一个参数且不加引号）。
+## 已验证 / 未验证
 
-### 写入的注册表项（全部在 HKCU）
+* ✅ 打包产物内容正确：解析 ISCC 输出确认 4 个程序文件 + 12 个指针图都打进包里，且不含任何配置/日志。
+* ✅ 解包正确：用 `/VERYSILENT /DIR=<测试目录>` 装到临时目录后，逐个文件与源文件**逐字节一致**
+  （`ScreenTime.exe`、`awtk.dll`、`SDL2.dll`、`default.bin`），`cursor*.png` 12 个齐全，
+  Inno 日志里是 `Installation process succeeded`。
+* ✅ 卸载保留数据（`UninstallSilent` 时直接跳过删数据的分支，不会误删）。
+* ⚠️ **注册表项与开始菜单快捷方式没有在自动化环境里验证过**：本机这套开发环境给进程下发的是
+  低完整性令牌，安装程序写 `HKCU\...\Uninstall\{GUID}_is1` 会被系统拒绝（日志里
+  `RegCreateKeyEx 失败；错误代码 5`），Inno 于是正确回滚。**这是环境限制，不是包的问题**——
+  正常双击运行（explorer 启动，正常完整性）不会有这个问题。
 
-| 键 | 值 |
-|---|---|
-| `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` | 字符串 `ScreenTime` = `"<安装目录>\ScreenTime.exe" --config "<安装目录>\config.dat"`（选项页取消勾选则不写；安装时会先删除旧值再按选择写入） |
-| `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenTime` | `DisplayName`=屏幕使用时间管理、`DisplayVersion`=<VERSION>、`Publisher`、`InstallLocation`、`DisplayIcon`、`UninstallString`、`QuietUninstallString`、`NoModify`=1、`NoRepair`=1、`EstimatedSize`(KB) |
+## 几个坑
 
-开始菜单快捷方式（当前用户）：
-
-- `开始菜单\ScreenTime\ScreenTime.lnk` → `ScreenTime.exe --config "<安装目录>\config.dat"`
-- `开始菜单\ScreenTime\卸载 ScreenTime.lnk` → `<安装目录>\uninstall.exe`
-
-### 关于「程序正在运行时安装」
-
-安装向导一开始就会检测 `ScreenTime.exe` 是否正在运行/程序文件是否被占用：先尝试以独占写方式打开目标 exe（程序运行时其映像被锁定，这正是覆盖时 `Access denied` 的原因），再用 `tasklist` 查进程名。检测到就弹窗提示，点「确定」后执行 `taskkill /F /IM ScreenTime.exe` 并继续安装；点「取消」退出安装。安装 Section 里还会再兜底结束一次。
-
-## 卸载
-
-三种方式：
-
-1. 开始菜单 → `ScreenTime` → `卸载 ScreenTime`；
-2. Windows 设置 → 应用 → 已安装的应用 → 「屏幕使用时间管理」→ 卸载；
-3. 直接运行 `<安装目录>\uninstall.exe`（静默：`uninstall.exe /S`）。
-
-卸载流程：先 `taskkill /F /IM ScreenTime.exe` → 弹窗询问「是否同时删除截图、日志和配置？」：
-
-- 选**是**：`RMDir /r $INSTDIR`（`screenshots\`、`logs\`、`config.dat` 全部删除）；
-- 选**否**：只删 `ScreenTime.exe`、`awtk.dll`、`SDL2.dll`、`res\`、`uninstall.exe`，**保留** `screenshots\`、`logs\`、`config.dat`。
-
-之后删除自启键、卸载注册信息键和开始菜单目录。
-
-## 已知限制
-
-- **这是 64 位安装包**：本机 NSIS 只带了 `amd64-unicode` 的 Stub 和插件（没有 `x86-*`），makensis 输出标注为 `amd64-unicode`，只能在 64 位 Windows 10/11 上运行（程序本体也是 w64devkit 编的 64 位 exe，一致）。
-- **没有真正做过安装验证**：当前会话的文件沙箱禁止写工作区以外的路径（`%LOCALAPPDATA%`、开始菜单、HKCU 都会被拒），所以只验证到「编译通过 + 7z 能列出全部 payload + 解包后逐文件 SHA256 与源文件一致」。安装/卸载的实际行为需要你在真实机器上跑一次确认。
-- **安装包没有自定义图标**：项目里没有 `ScreenTime.ico`，默认用 NSIS 自带图标。想要图标就把 `ScreenTime.ico` 放到 `installer\` 目录后再打包（脚本会自动加 `/DICON_FILE=`），或者编译时手动加 `/DICON_FILE=<路径>`。注意 `D:\Work\AWTK\awtk-master\win32_res\awtk.ico` 是 AWTK 自己的图标，没有被采用。
+* **`.iss` 必须 UTF-8 带 BOM**：里面有中文（`AppName`、自定义消息），没有 BOM 时 Inno 会按 ANSI
+  解码，向导里就是乱码。打包脚本会在缺失时自动用带 BOM 的副本编译。
+* **`make_installer.ps1` 必须纯 ASCII**：Windows PowerShell 5.1 会把无 BOM 的文件按 ANSI 解码，
+  脚本里写中文注释可能因为乱码产生续行反引号，把下一行代码吞进注释（踩过）。
+* **不要用 `nsExec` 这类靠命名管道的插件**（早期 NSIS 版踩过）：受限环境下插件取输出会失败，
+  甚至让安装程序静默退出。Inno 的 `Exec`/`ExecWait` 不需要管道。
+* **`AppId` 不要改**：`{{8F3B6C1E-...}` 决定"这是同一个程序"，改了会变成两套安装记录。
+* **旧的 NSIS 脚本已删除**（`installer\ScreenTime.nsi`）：需要时用
+  `git show <commit>:installer/ScreenTime.nsi` 从历史里取。

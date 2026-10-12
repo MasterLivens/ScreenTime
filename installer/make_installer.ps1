@@ -1,13 +1,13 @@
 # =============================================================================
-#  ScreenTime installer build script
+#  ScreenTime installer build script  (Inno Setup 7)
 # -----------------------------------------------------------------------------
-#  Builds dist\ScreenTimeSetup-<version>.exe (NSIS) and, unless -SkipPortable is
-#  given, dist\ScreenTime-<version>-portable.zip.
+#  Builds dist\ScreenTimeSetup-<version>.exe (Inno Setup) and, unless
+#  -SkipPortable is given, dist\ScreenTime-<version>-portable.zip.
 #
 #  IMPORTANT: this file is intentionally PURE ASCII.
 #  Windows PowerShell 5.1 decodes BOM-less files as ANSI, so non-ASCII text in
 #  this script would be garbled and could break parsing. Keep all messages in
-#  English; the Chinese UI text lives in ScreenTime.nsi (UTF-8, no BOM).
+#  English; the Chinese UI text lives in ScreenTime.iss (UTF-8 WITH BOM).
 #
 #  Usage:
 #    powershell -NoProfile -ExecutionPolicy Bypass -File installer\make_installer.ps1
@@ -23,16 +23,15 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------------------
-# Configuration (absolute paths; no spaces in any of them)
+# Configuration (absolute paths)
 # ---------------------------------------------------------------------------
 $ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot  = Split-Path -Parent $ScriptDir
-$NsiFile      = Join-Path $ScriptDir  'ScreenTime.nsi'
+$IssFile      = Join-Path $ScriptDir  'ScreenTime.iss'
 $VersionFile  = Join-Path $ProjectRoot 'VERSION'
 $DistDir      = Join-Path $ProjectRoot 'dist'
 
-$MakensisExe  = 'D:\w64devkit\bin\makensis.exe'
-$NsisShareDir = 'D:\w64devkit\share\nsis'
+$IsccExe      = 'C:\Program Files\Inno Setup 7\ISCC.exe'
 $SevenZipExe  = 'C:\Program Files\7-Zip\7z.exe'
 $AwtkRoot     = 'D:\Work\AWTK\awtk-master'
 
@@ -60,44 +59,51 @@ function Stop-Build {
     exit 1
 }
 
-function Format-Arg {
-    param([string]$Value)
-    if ($Value -match '\s') { return '"' + $Value + '"' }
-    return $Value
-}
-
-Write-Host '============================================================='
-Write-Host ' ScreenTime installer build'
-Write-Host '============================================================='
-
 # ---------------------------------------------------------------------------
 # 1. Tool checks
 # ---------------------------------------------------------------------------
+Write-Host '============================================================='
+Write-Host ' ScreenTime installer build (Inno Setup 7)'
+Write-Host '============================================================='
+
 Write-Step 'Checking build tools'
 
-if (-not (Test-Path -LiteralPath $MakensisExe -PathType Leaf)) {
-    Stop-Build "makensis.exe not found: $MakensisExe"
+if (-not (Test-Path -LiteralPath $IsccExe -PathType Leaf)) {
+    Stop-Build "ISCC.exe not found: $IsccExe (install Inno Setup 7)"
 }
-Write-Ok "makensis: $MakensisExe"
-
-if (Test-Path -LiteralPath $NsisShareDir -PathType Container) {
-    # Make sure Include\ / Stubs\ / Plugins\ are found even if the environment
-    # is odd; if the build still complains, add /NOCONFIG on the command line.
-    $env:NSISDIR = $NsisShareDir
-    Write-Ok "NSISDIR: $NsisShareDir"
-} else {
-    Write-Host "    WARN: NSIS share dir not found, relying on makensis defaults: $NsisShareDir" -ForegroundColor Yellow
-}
+Write-Ok "ISCC: $IsccExe"
 
 $HaveSevenZip = Test-Path -LiteralPath $SevenZipExe -PathType Leaf
 if ($HaveSevenZip) {
     Write-Ok "7-Zip: $SevenZipExe"
 } else {
-    Write-Host "    WARN: 7z.exe not found ($SevenZipExe) - content listing will be skipped" -ForegroundColor Yellow
+    Write-Host "    WARN: 7z.exe not found ($SevenZipExe) - portable zip uses Compress-Archive" -ForegroundColor Yellow
 }
 
-if (-not (Test-Path -LiteralPath $NsiFile -PathType Leaf)) {
-    Stop-Build "NSIS script not found: $NsiFile"
+if (-not (Test-Path -LiteralPath $IssFile -PathType Leaf)) {
+    Stop-Build "Inno script not found: $IssFile"
+}
+Write-Ok "script: $IssFile"
+
+# The .iss carries Chinese text, so it must be UTF-8 WITH BOM or Inno Setup
+# would decode it as ANSI and the wizard would show mojibake. If the BOM is
+# missing (e.g. an editor rewrote the file), compile a BOM-normalized copy from
+# the (always writable) build\ directory instead of failing.
+$BuildDir = Join-Path $ProjectRoot 'build'
+$issBytes = [System.IO.File]::ReadAllBytes($IssFile)
+$hasBom = ($issBytes.Length -ge 3 -and $issBytes[0] -eq 0xEF -and $issBytes[1] -eq 0xBB -and $issBytes[2] -eq 0xBF)
+if (-not $hasBom) {
+    Write-Host '    WARN: .iss has no UTF-8 BOM; compiling a normalized copy' -ForegroundColor Yellow
+    if (-not (Test-Path -LiteralPath $BuildDir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
+    }
+    $issNormalized = Join-Path $BuildDir 'ScreenTime.generated.iss'
+    $issText = [System.IO.File]::ReadAllText($IssFile)
+    [System.IO.File]::WriteAllText($issNormalized, $issText, (New-Object System.Text.UTF8Encoding($true)))
+    $IssFile = $issNormalized
+    Write-Ok "normalized copy: $IssFile"
+} else {
+    Write-Ok 'script encoding: UTF-8 with BOM'
 }
 
 # ---------------------------------------------------------------------------
@@ -121,7 +127,7 @@ if ($Version -notmatch '^\d+(\.\d+){1,3}$') {
     Stop-Build "VERSION content is not a dotted version number: '$Version'"
 }
 
-# NSIS VIProductVersion needs exactly four numeric fields.
+# VersionInfoVersion needs exactly four numeric fields.
 $verParts = @($Version.Split('.'))
 while ($verParts.Count -lt 4) { $verParts += '0' }
 $ProductVersion = ($verParts[0..3] -join '.')
@@ -172,29 +178,26 @@ if ($missing.Count -gt 0) {
     Stop-Build ("$($missing.Count) required payload file(s) missing; build aborted")
 }
 
-# Never ship config.ini / screenshots / logs.
+# Never ship config.ini / config.dat / screenshots / logs.
 foreach ($forbidden in @('config.ini', 'config.dat')) {
     if (Test-Path -LiteralPath (Join-Path $ProjectRoot $forbidden) -PathType Leaf) {
         Write-Host "    NOTE: $forbidden exists in the project root but is NOT packaged" -ForegroundColor DarkGray
     }
 }
 
-# Optional installer icon: drop ScreenTime.ico next to the .nsi (or in the
-# project root) and it is picked up automatically. Not required.
-$IconFile = $null
-foreach ($candidate in @((Join-Path $ScriptDir 'ScreenTime.ico'), (Join-Path $ProjectRoot 'ScreenTime.ico'))) {
-    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $IconFile = $candidate; break }
-}
-if ($IconFile) {
+# Optional installer icon: drop ScreenTime.ico next to the .iss and it is picked
+# up automatically (the .iss checks for it with ISPP). Not required.
+$IconFile = Join-Path $ScriptDir 'ScreenTime.ico'
+if (Test-Path -LiteralPath $IconFile -PathType Leaf) {
     Write-Ok "optional icon: $IconFile"
 } else {
-    Write-Host '    INFO: no ScreenTime.ico found, the installer keeps the default NSIS icon' -ForegroundColor DarkGray
+    Write-Host '    INFO: no ScreenTime.ico in installer\, the setup keeps the default Inno icon' -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------------
-# 4. Run makensis
+# 4. Run ISCC
 # ---------------------------------------------------------------------------
-Write-Step 'Compiling installer with makensis'
+Write-Step 'Compiling installer with ISCC'
 
 if (-not (Test-Path -LiteralPath $DistDir -PathType Container)) {
     New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
@@ -205,86 +208,69 @@ if (Test-Path -LiteralPath $OutExe) {
     Remove-Item -LiteralPath $OutExe -Force
 }
 
-$makensisArgs = @(
-    '/INPUTCHARSET', 'UTF8',
-    "/DVERSION=$Version",
-    "/DPRODUCT_VERSION=$ProductVersion",
-    "/DPAYLOAD_SRC=$ProjectRoot",
-    "/DAWTK_SRC=$AwtkRoot",
-    "/DOUT_FILE=$OutExe"
+$isccArgs = @(
+    "/DAppVersion=$Version",
+    "/DAppVersion4=$ProductVersion",
+    "/DPayloadDir=$ProjectRoot",
+    "/DAwtkDir=$AwtkRoot",
+    "/O$DistDir",
+    $IssFile
 )
-if ($IconFile) { $makensisArgs += "/DICON_FILE=$IconFile" }
-$makensisArgs += $NsiFile
 
-$quotedArgs = ($makensisArgs | ForEach-Object { Format-Arg $_ }) -join ' '
-Write-Host "    $MakensisExe $quotedArgs" -ForegroundColor DarkGray
+Write-Host ("    `"$IsccExe`" {0}" -f ($isccArgs -join ' ')) -ForegroundColor DarkGray
 Write-Host ''
 
-& $MakensisExe @makensisArgs
-$makensisExit = $LASTEXITCODE
+$isccOutput = & $IsccExe @isccArgs 2>&1
+$isccExit = $LASTEXITCODE
+foreach ($line in $isccOutput) { Write-Host "    $line" }
 
-if ($makensisExit -ne 0) {
-    Stop-Build "makensis failed with exit code $makensisExit"
+if ($isccExit -ne 0) {
+    Stop-Build "ISCC failed with exit code $isccExit"
 }
 if (-not (Test-Path -LiteralPath $OutExe -PathType Leaf)) {
-    Stop-Build "makensis reported success but $OutExe does not exist"
+    Stop-Build "ISCC reported success but $OutExe does not exist"
 }
-Write-Ok "makensis exit code 0"
+Write-Ok "ISCC exit code 0"
 
 # ---------------------------------------------------------------------------
-# 5. Verify the produced package
+# 5. Verify what actually went into the package
 # ---------------------------------------------------------------------------
-Write-Step 'Verifying package contents (7z listing)'
+# ISCC prints one "Compressing: <path>" line per packed file, so the compile
+# output itself is a reliable inventory of the payload.
+Write-Step 'Verifying packed payload (ISCC compile log)'
 
-if ($HaveSevenZip) {
-    $sevenZipOutput = & $SevenZipExe l $OutExe 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Stop-Build "7z failed to list $OutExe (exit code $LASTEXITCODE)"
+$packed = New-Object System.Collections.Generic.List[string]
+foreach ($line in $isccOutput) {
+    $m = [regex]::Match([string]$line, 'Compressing:\s+(.+?)\s*$')
+    if ($m.Success) {
+        $name = $m.Groups[1].Value
+        $name = $name -replace '^\\\\\?\\', ''
+        $packed.Add($name)
     }
-    foreach ($line in $sevenZipOutput) { Write-Host "    $line" }
-
-    # Parse the name column of the 7z file table (rows carrying an attribute
-    # column of five dots are real entries; the summary line is not).
-    $entryNames = New-Object System.Collections.Generic.List[string]
-    foreach ($line in $sevenZipOutput) {
-        $m = [regex]::Match([string]$line, '\.{5}\s+\d+\s+\d*\s*(\S.*?)\s*$')
-        if ($m.Success) { $entryNames.Add($m.Groups[1].Value) }
-    }
-
-    $problems = New-Object System.Collections.Generic.List[string]
-
-    $requiredEntries = @(
-        'ScreenTime.exe',
-        'awtk.dll',
-        'SDL2.dll',
-        'res\assets\default\raw\styles\default.bin'
-    )
-    foreach ($req in $requiredEntries) {
-        if (-not ($entryNames -contains $req)) {
-            $problems.Add("package is missing: $req")
-        }
-    }
-    foreach ($scale in $ScaleDirs) {
-        $hit = @($entryNames | Where-Object { $_ -like ("res\assets\default\raw\images\" + $scale + "\cursor*.png") })
-        if ($hit.Count -eq 0) {
-            $problems.Add("package is missing cursor*.png under res\assets\default\raw\images\$scale\")
-        }
-    }
-    foreach ($bad in @('config.ini', 'config.dat')) {
-        if (@($entryNames | Where-Object { $_ -like ("*" + $bad) }).Count -gt 0) {
-            $problems.Add("package must not contain $bad")
-        }
-    }
-
-    if ($problems.Count -gt 0) {
-        Write-Host ''
-        foreach ($p in $problems) { Write-Host "  - $p" -ForegroundColor Red }
-        Stop-Build 'package content verification failed'
-    }
-    Write-Ok ("package lists {0} payload/plugin entries; all required files present" -f $entryNames.Count)
-} else {
-    Write-Host '    WARN: 7z unavailable, skipped package content verification' -ForegroundColor Yellow
 }
+
+$problems = New-Object System.Collections.Generic.List[string]
+$packedText = ($packed -join "`n")
+
+$requiredNames = @('ScreenTime.exe', 'awtk.dll', 'SDL2.dll', 'default.bin')
+foreach ($req in $requiredNames) {
+    if ($packedText -notmatch [regex]::Escape($req)) { $problems.Add("package is missing: $req") }
+}
+foreach ($scale in $ScaleDirs) {
+    if ($packedText -notmatch ("images\\" + $scale + "\\cursor")) {
+        $problems.Add("package is missing cursor*.png under images\$scale\")
+    }
+}
+foreach ($bad in @('config.ini', 'config.dat', 'activity.log')) {
+    if ($packedText -match [regex]::Escape($bad)) { $problems.Add("package must not contain $bad") }
+}
+
+if ($problems.Count -gt 0) {
+    Write-Host ''
+    foreach ($p in $problems) { Write-Host "  - $p" -ForegroundColor Red }
+    Stop-Build 'package content verification failed'
+}
+Write-Ok ("{0} file(s) packed; all required payload present" -f $packed.Count)
 
 # ---------------------------------------------------------------------------
 # 6. Portable zip (optional but on by default)
@@ -352,7 +338,7 @@ if ($ZipPath) {
 
 Write-Host ''
 Write-Host 'Rerun command:' -ForegroundColor Cyan
-Write-Host ("    $MakensisExe $quotedArgs")
+Write-Host ("    `"$IsccExe`" {0}" -f ($isccArgs -join ' '))
 Write-Host ''
 Write-Host 'DONE' -ForegroundColor Green
 exit 0
