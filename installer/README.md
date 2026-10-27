@@ -38,11 +38,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.p
 7. 打绿色包（`Compress-Archive`），并列出压缩包里的条目；
 8. 打印产物完整路径、大小，最后一行打印**可直接复制的 ISCC 命令**。
 
-等价的 ISCC 命令（版本 1.1.1 时）：
+等价的 ISCC 命令（版本 1.1.2 时）：
 
 ```powershell
 & 'C:\Program Files\Inno Setup 7\ISCC.exe' `
-    /DAppVersion=1.1.1 /DAppVersion4=1.1.1.0 `
+    /DAppVersion=1.1.2 /DAppVersion4=1.1.2.0 `
     /DPayloadDir=D:\Work\ScreenTime `
     /DAwtkDir=D:\Work\AWTK\awtk-master `
     /OD:\Work\ScreenTime\dist `
@@ -74,11 +74,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.p
 
 ```powershell
 # 静默安装（加 /LOG= 就有完整日志，排查问题时很有用）
-.\dist\ScreenTimeSetup-1.1.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LANG=chinese `
+.\dist\ScreenTimeSetup-1.1.2.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LANG=chinese `
     /LOG="D:\Work\ScreenTime\build\inno_install.log"
 
 # 换目录、不要自启、不要快捷方式
-.\dist\ScreenTimeSetup-1.1.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+.\dist\ScreenTimeSetup-1.1.2.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
     /DIR="D:\some\dir" /NOICONS /TASKS=""
 
 # 静默卸载（保留个人数据）

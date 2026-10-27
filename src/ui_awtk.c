@@ -39,7 +39,7 @@
 #define BTN_TRAY_SHOW  210
 
 /* 程序版本（和根目录 VERSION 保持一致） */
-#define ST_VERSION     L"1.1.1"
+/* 程序版本（和根目录 VERSION 保持一致）；定义在 appstate.h，main 与界面共用 */
 
 #define STATUS_W       470
 #define STATUS_H       240
@@ -269,8 +269,10 @@ static void pick_res_root(char* out, size_t cap) {
   StringCchCatW(probe, MAX_PATH, L"\\res\\assets\\default\\raw\\styles\\default.bin");
   if (GetFileAttributesW(probe) != INVALID_FILE_ATTRIBUTES) {
     WToUtf8(exeDir, out, (int)cap);
+    LogEventW(L"界面资源：使用程序目录（%s）", probe);
   } else {
     StringCchCopyA(out, cap, AWTK_RES_ROOT);
+    LogEventW(L"界面资源：程序目录里没有 %s，回退到内置路径 %S", probe, AWTK_RES_ROOT);
   }
 }
 
@@ -1811,28 +1813,74 @@ void LockEnd(int autoUnlock) {
 }
 
 /* ---------------- 对外接口 ---------------- */
+/* ---------------- AWTK 自己的日志 -> activity.log ----------------
+   AWTK/SDL 在初始化失败时只会用它自己的 log 输出原因（例如
+   "Window could not be created! SDL_Error: ..."）。把它接到我们的日志里，
+   远程机器上"启动就没了"才有据可查。只收警告和错误，避免刷屏。 */
+static ret_t AwtkLogHook(void* ctx, tk_log_level_t level, const char* format, va_list ap) {
+  char buf[1024];
+  WCHAR wbuf[1024];
+  (void)ctx;
+  if (format == NULL) return RET_OK;
+  if (level < LOG_LEVEL_WARN) return RET_OK;
+  _vsnprintf(buf, sizeof(buf) - 1, format, ap);
+  buf[sizeof(buf) - 1] = 0;
+  wbuf[0] = 0;
+  Utf8ToW(buf, wbuf, (int)(sizeof(wbuf) / sizeof(WCHAR)));
+  LogEventW(L"[AWTK %s] %s", (level == LOG_LEVEL_ERROR) ? L"错误" : L"警告", wbuf);
+  return RET_OK;
+}
+
 int UiInit(void) {
   char root[MAX_PATH];
 
+  /* 把 AWTK/SDL 自己的日志接到 activity.log 里（只收警告和错误）。
+     远程机器上"启动就没了"时，SDL/OpenGL 的失败原因只有 AWTK 自己知道。 */
+  log_set_hook(AwtkLogHook, NULL);
+
   pick_res_root(root, sizeof(root));
+  log_set_log_level(LOG_LEVEL_WARN);
+  SetInitStage(L"界面：定位资源目录");
   LogUtf8(root);
+
+  /* 关键界面资源自检：程序目录里缺 res 时把缺哪个文件写清楚
+     （绿色包没解压全、或安装时被杀毒软件拦了，都会表现成"界面起不来"） */
+  {
+    WCHAR stylePath[MAX_PATH];
+    WCHAR resDir[MAX_PATH];
+    StringCchCopyW(resDir, MAX_PATH, g_baseDir);
+    StringCchCatW(resDir, MAX_PATH, L"\\res");
+    StringCchCopyW(stylePath, MAX_PATH, resDir);
+    StringCchCatW(stylePath, MAX_PATH, L"\\assets\\default\\raw\\styles\\default.bin");
+    if (GetFileAttributesW(stylePath) == INVALID_FILE_ATTRIBUTES) {
+      LogEventW(L"界面资源自检：%s\\assets\\default\\raw\\styles\\default.bin 不存在！"
+                L"（绿色包没解压全，或被杀毒软件拦掉了）", resDir);
+    } else {
+      LogEventW(L"界面资源自检：主题文件存在");
+    }
+  }
 
   /* tk_init 里 SDL 会把窗口直接建成可见的；挂上 CBT 钩子抢在创建那一刻摘掉 WS_VISIBLE，
      等我们布局好（右下角）并决定显示时再显示，避免启动瞬间闪一下。 */
   HideOnCreateBegin();
 
+  SetInitStage(L"界面：tk_pre_init");
   tk_pre_init();
+
+  SetInitStage(L"界面：tk_init（创建窗口，需要可用 OpenGL 3）");
   if (tk_init(STATUS_W, STATUS_H, APP_DESKTOP, "ScreenTime", root) != RET_OK) {
     HideOnCreateEnd();
-    LogEventW(L"AWTK 初始化失败");
+    LogEventW(L"AWTK 初始化失败（tk_init 返回失败，多半是窗口/OpenGL 创建不出来）");
     return 0;
   }
   HideOnCreateEnd();
+  SetInitStage(L"界面：tk_init 成功，加载主题资源");
 
   if (assets_init() != RET_OK) {
-    LogEventW(L"AWTK 资源初始化失败");
+    LogEventW(L"AWTK 资源初始化失败（res 目录不完整？）");
     return 0;
   }
+  SetInitStage(L"界面：加载中文字体");
   load_cjk_font();
   log_set_log_level(LOG_LEVEL_ERROR);
   window_manager_set_cursor(window_manager(), "cursor");

@@ -108,8 +108,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Extra '-DST_PWD
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1
 # 产物：
-#   dist\ScreenTimeSetup-1.1.1.exe        4.1 MB，Inno Setup 7 做的安装包（含卸载程序）
-#   dist\ScreenTime-1.1.1-portable.zip    2.9 MB，免安装绿色包
+#   dist\ScreenTimeSetup-1.1.2.exe        4.1 MB，Inno Setup 7 做的安装包（含卸载程序）
+#   dist\ScreenTime-1.1.2-portable.zip    2.9 MB，免安装绿色包
 ```
 
 安装包行为：按用户安装（**不需要管理员权限**）、默认装到 `%LOCALAPPDATA%\ScreenTime`、

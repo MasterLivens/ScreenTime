@@ -30,6 +30,17 @@ extern WCHAR g_lastAnswer[];
 
 extern HINSTANCE g_hInst;
 
+/* 版本号（与根目录 VERSION 保持一致） */
+#ifndef ST_VERSION
+#define ST_VERSION L"1.1.2"
+#endif
+
+/* 初始化进度：每进入一个可能失败的步骤调用一次。
+   既更新全局，也写一行 activity.log —— 万一进程在启动阶段崩掉，
+   日志最后一行就是死在哪一步，远程排查黑屏/闪退时非常关键。 */
+extern const WCHAR *g_initStage;
+void SetInitStage(const WCHAR *stage);
+
 void SessionReset(LONGLONG lenMs, const WCHAR *reason);
 void SessionTick(void);
 

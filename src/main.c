@@ -39,6 +39,65 @@ volatile LONGLONG g_lastShotTick = 0;
 WCHAR g_lastShotFile[512] = L"";
 WCHAR g_lastAnswer[1024]  = L"";
 
+/* ---------------- 启动阶段跟踪 + 崩溃兜底 ---------------- */
+const WCHAR *g_initStage = L"进程启动";
+
+void SetInitStage(const WCHAR *stage)
+{
+    g_initStage = stage;
+    LogEventW(L"阶段：%s", stage);
+}
+
+/* 未处理异常：把异常码、出错地址、所属模块和当前阶段写进日志再让系统继续处理。
+   远程机器上"启动了但看不到进程"时，靠这一行就能知道是崩在哪一步、崩在哪个 DLL。 */
+/* 系统版本：GetVersionEx 会被"兼容性垫片"骗成 6.2，改用 ntdll!RtlGetVersion 取真实版本 */
+static void LogOsVersion(void)
+{
+    typedef LONG (WINAPI *RtlGetVersionFn)(PRTL_OSVERSIONINFOW);
+    RTL_OSVERSIONINFOW vi;
+    BOOL got = FALSE;
+
+    ZeroMemory(&vi, sizeof(vi));
+    vi.dwOSVersionInfoSize = sizeof(vi);
+    {
+        HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        if (ntdll) {
+            RtlGetVersionFn fn = (RtlGetVersionFn)(void *)GetProcAddress(ntdll, "RtlGetVersion");
+            if (fn && fn(&vi) == 0) got = TRUE;
+        }
+    }
+    if (!got) {
+        OSVERSIONINFOW os;
+        ZeroMemory(&os, sizeof(os));
+        os.dwOSVersionInfoSize = sizeof(os);
+        if (GetVersionExW(&os)) {
+            vi.dwMajorVersion = os.dwMajorVersion;
+            vi.dwMinorVersion = os.dwMinorVersion;
+            vi.dwBuildNumber = os.dwBuildNumber;
+        }
+    }
+    LogEventW(L"系统：Windows %lu.%lu.%lu（%d 位程序）",
+              (unsigned long)vi.dwMajorVersion, (unsigned long)vi.dwMinorVersion,
+              (unsigned long)vi.dwBuildNumber, (int)(sizeof(void *) * 8));
+}
+
+static LONG WINAPI OnUnhandledException(EXCEPTION_POINTERS *ep)
+{
+    DWORD code = (ep && ep->ExceptionRecord) ? ep->ExceptionRecord->ExceptionCode : 0;
+    void *addr = (ep && ep->ExceptionRecord) ? ep->ExceptionRecord->ExceptionAddress : NULL;
+    WCHAR modPath[MAX_PATH];
+    HMODULE hm = NULL;
+    StringCchCopyW(modPath, MAX_PATH, L"?");
+    if (addr && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   (LPCWSTR)addr, &hm) && hm) {
+        GetModuleFileNameW(hm, modPath, MAX_PATH);
+    }
+    LogEventW(L"！！！程序异常退出：code=0x%08X 地址=%p 模块=%s 阶段=%s",
+              (unsigned)code, addr, modPath, g_initStage ? g_initStage : L"?");
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 HINSTANCE g_hInst = NULL;
 
 static ULONG_PTR g_gdiToken = 0;
@@ -279,6 +338,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nS
     EnsureDirW(g_logDir);
 
     LogInit(g_logDir);
+    SetUnhandledExceptionFilter(OnUnhandledException);
+    {
+        WCHAR exePath[MAX_PATH] = L"?";
+        GetModuleFileNameW(NULL, exePath, MAX_PATH);
+        LogEventW(L"ScreenTime %s 启动：%s", ST_VERSION, exePath);
+        LogOsVersion();
+    }
+    SetInitStage(L"配置已加载");
     LogEventW(L"ScreenTime 启动：限时 %d 分钟，休息 %d 分钟，截图 %s（间隔 %d 秒，%s），模型 %s",
               g_cfg.session_minutes, g_cfg.break_minutes,
               g_cfg.screenshot_enabled ? L"开" : L"关",
@@ -297,6 +364,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nS
 
     CleanupOldShots();
 
+    SetInitStage(L"初始化 GDI+");
     GdiplusStartupInput gdiIn;
     memset(&gdiIn, 0, sizeof(gdiIn));
     gdiIn.GdiplusVersion = 1;
@@ -308,17 +376,29 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nS
         LogEventW(L"GDI+ 初始化失败（status=%d），截图功能不可用", (int)gstat);
     }
 
+    SetInitStage(L"安装键盘/鼠标钩子");
     HooksInstall();
 
     LONGLONG len = (LONGLONG)g_cfg.session_minutes * 60000;
     SessionReset(len, L"程序启动");
 
+    SetInitStage(L"开始初始化界面（AWTK）");
     if (!UiInit()) {
-        LogEventW(L"界面初始化失败");
+        LogEventW(L"界面初始化失败：进程无法继续（见上面的阶段/AWTK 日志）");
+        /* 在别的机器上"启动了但看不到进程"时，至少弹一个能读的提示 */
+        MessageBoxW(NULL,
+                    L"界面初始化失败：无法创建窗口。\n\n"
+                    L"常见原因：\n"
+                    L"  1) 显卡驱动不支持 OpenGL 3（虚拟机/远程桌面/旧驱动常见）；\n"
+                    L"  2) 安装目录下缺少 res 界面资源（应重装或重新解压绿色包）。\n\n"
+                    L"请把安装目录下 logs\\activity.log 的最后几十行发给开发者。",
+                    L"屏幕使用时间管理", MB_ICONERROR | MB_OK);
+        return 1;
     } else if (g_cfg.start_hidden) {
         LogEventW(L"启动模式：界面隐藏（start_hidden=1，show_tray_icon=%d）",
                   g_cfg.show_tray_icon);
     }
+    SetInitStage(L"界面就绪，进入主循环");
 
     g_lastInputTick = (LONGLONG)GetTickCount64();
 

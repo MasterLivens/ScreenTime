@@ -17,7 +17,10 @@
 [CmdletBinding()]
 param(
     # Do not build the portable zip.
-    [switch]$SkipPortable
+    [switch]$SkipPortable,
+    # Optional: package this ScreenTime.exe instead of <project root>\ScreenTime.exe.
+    # Useful when the exe was built elsewhere, e.g. build.ps1 -Out out\ScreenTime.exe
+    [string]$PayloadExe = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,11 +34,20 @@ $IssFile      = Join-Path $ScriptDir  'ScreenTime.iss'
 $VersionFile  = Join-Path $ProjectRoot 'VERSION'
 $DistDir      = Join-Path $ProjectRoot 'dist'
 
+if ($PayloadExe) {
+    if (-not [System.IO.Path]::IsPathRooted($PayloadExe)) {
+        $PayloadExe = Join-Path $ProjectRoot $PayloadExe
+    }
+} else {
+    $PayloadExe = Join-Path $ProjectRoot 'ScreenTime.exe'
+}
+$PayloadDir   = Split-Path -Parent $PayloadExe
+
 $IsccExe      = 'C:\Program Files\Inno Setup 7\ISCC.exe'
 $SevenZipExe  = 'C:\Program Files\7-Zip\7z.exe'
 $AwtkRoot     = 'D:\Work\AWTK\awtk-master'
 
-$DefaultVersion = '1.1.1'
+$DefaultVersion = '1.1.2'
 $ScaleDirs      = @('x1', 'x2', 'x3', 'x4')
 
 # ---------------------------------------------------------------------------
@@ -141,7 +153,7 @@ Write-Step 'Checking payload sources'
 $missing = New-Object System.Collections.Generic.List[string]
 
 $flatSources = @(
-    @{ Path = (Join-Path $ProjectRoot 'ScreenTime.exe');                              Dest = 'ScreenTime.exe' },
+    @{ Path = $PayloadExe;                                                           Dest = 'ScreenTime.exe' },
     @{ Path = (Join-Path $AwtkRoot 'build_mingw\awtk.dll');                           Dest = 'awtk.dll' },
     @{ Path = (Join-Path $AwtkRoot 'build_mingw\third_party\SDL2\SDL2.dll');          Dest = 'SDL2.dll' },
     @{ Path = (Join-Path $AwtkRoot 'res\assets\default\raw\styles\default.bin');      Dest = 'res\assets\default\raw\styles\default.bin' }
@@ -211,7 +223,7 @@ if (Test-Path -LiteralPath $OutExe) {
 $isccArgs = @(
     "/DAppVersion=$Version",
     "/DAppVersion4=$ProductVersion",
-    "/DPayloadDir=$ProjectRoot",
+    "/DPayloadDir=$PayloadDir",
     "/DAwtkDir=$AwtkRoot",
     "/O$DistDir",
     $IssFile
@@ -289,7 +301,7 @@ if (-not $SkipPortable) {
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $stageResRaw 'styles') | Out-Null
 
-    Copy-Item -LiteralPath (Join-Path $ProjectRoot 'ScreenTime.exe') -Destination $stage -Force
+    Copy-Item -LiteralPath $PayloadExe -Destination $stage -Force
     Copy-Item -LiteralPath (Join-Path $AwtkRoot 'build_mingw\awtk.dll') -Destination $stage -Force
     Copy-Item -LiteralPath (Join-Path $AwtkRoot 'build_mingw\third_party\SDL2\SDL2.dll') -Destination $stage -Force
     Copy-Item -LiteralPath (Join-Path $AwtkRoot 'res\assets\default\raw\styles\default.bin') -Destination (Join-Path $stageResRaw 'styles') -Force
