@@ -1834,6 +1834,14 @@ static ret_t AwtkLogHook(void* ctx, tk_log_level_t level, const char* format, va
 int UiInit(void) {
   char root[MAX_PATH];
 
+#ifdef WITH_NANOVG_SOFT
+  /* 软件渲染构建（没有 OpenGL 也能跑）：强制 SDL 只用纯软件渲染器，
+     不去尝试 D3D/OpenGL 加速路径，避免在没有显卡驱动支持的机器上
+     触发驱动初始化甚至崩溃。必须在 tk_init 之前设置。 */
+  SetEnvironmentVariableW(L"SDL_RENDER_DRIVER", L"software");
+  SetEnvironmentVariableW(L"SDL_FRAMEBUFFER_ACCELERATION", L"0");
+#endif
+
   /* 把 AWTK/SDL 自己的日志接到 activity.log 里（只收警告和错误）。
      远程机器上"启动就没了"时，SDL/OpenGL 的失败原因只有 AWTK 自己知道。 */
   log_set_hook(AwtkLogHook, NULL);

@@ -15,6 +15,22 @@
 工具位置：`C:\Program Files\Inno Setup 7\ISCC.exe`（命令行编译器，7.1.0）。
 中文界面用的是 Inno 自带的 `Languages\ChineseSimplified.isl`，不需要额外下载语言包。
 
+## 两种包（GL / 软件渲染）
+
+| 包 | 用途 |
+|---|---|
+| `ScreenTimeSetup-<版本>.exe` | GL/OpenGL 版，普通电脑用（界面按 DPI 缩放） |
+| `ScreenTimeSetup-<版本>-soft.exe` | **软件渲染**版，给没有 OpenGL 的机器（虚拟机 / 远程桌面 / 基本显示适配器） |
+
+```powershell
+# GL 版（默认）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1 -PayloadExe out\gl\ScreenTime.exe
+# 软件渲染版（先跑 .\build_awtk_soft.ps1，再 build.ps1 -Backend soft）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1 -Backend soft -PayloadExe out\soft\ScreenTime.exe
+```
+
+两个包的 `AppId` 相同、装到同一目录，所以互相覆盖安装就是普通升级，个人数据不受影响。
+
 ## 怎么打包
 
 ```powershell

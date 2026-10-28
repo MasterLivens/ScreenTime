@@ -19,16 +19,21 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.1.1"
+  #define AppVersion "1.1.3"
 #endif
 #ifndef AppVersion4
-  #define AppVersion4 "1.1.1.0"
+  #define AppVersion4 "1.1.3.0"
 #endif
 #ifndef PayloadDir
   #define PayloadDir "D:\Work\ScreenTime"
 #endif
 #ifndef AwtkDir
   #define AwtkDir "D:\Work\AWTK\awtk-master"
+#endif
+; AWTK 的构建目录：GL 版是 build_mingw，软件渲染版（无 OpenGL 的机器用）在仓库的 out\awtk_soft。
+; 由 make_installer.ps1 通过 /DAwtkBuild=... 传进来；这里给个默认值保证手工调 ISCC 也能编译。
+#ifndef AwtkBuild
+  #define AwtkBuild AwtkDir + "\build_mingw"
 #endif
 
 #define AppName "屏幕使用时间管理"
@@ -100,8 +105,8 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; \
 [Files]
 ; 程序本体
 Source: "{#PayloadDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#AwtkDir}\build_mingw\awtk.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#AwtkDir}\build_mingw\third_party\SDL2\SDL2.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#AwtkBuild}\awtk.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#AwtkBuild}\third_party\SDL2\SDL2.dll"; DestDir: "{app}"; Flags: ignoreversion
 ; AWTK 界面资源（主题 + 鼠标指针；指针文件缺失不报错）
 Source: "{#AwtkDir}\res\assets\default\raw\styles\default.bin"; \
         DestDir: "{app}\res\assets\default\raw\styles"; Flags: ignoreversion

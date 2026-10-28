@@ -69,6 +69,30 @@ cmake --build D:\Work\AWTK\awtk-master\build_mingw
 
 产物：`build_mingw\awtk.dll`、`build_mingw\libawtk.dll.a`、`build_mingw\third_party\SDL2\SDL2.dll`。
 
+**没有 OpenGL 的机器（虚拟机 / 远程桌面 / "Microsoft 基本显示适配器"）跑不起来怎么办？**
+AWTK 默认用 OpenGL 渲染，这类机器上程序会在创建窗口那一步直接崩掉（日志停在
+`阶段：界面：tk_init`）。这种情况下改用**软件渲染**构建（nanovg AGGE，完全不碰显卡驱动）：
+
+```powershell
+cd D:\Work\ScreenTime
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_awtk_soft.ps1
+```
+
+这条命令把 AWTK 编到工作区里的 `out\awtk_soft\`（**不动** `build_mingw`），之后：
+
+```powershell
+# 编程序（软件渲染后端）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Backend soft -Out out\soft\ScreenTime.exe
+# 打软件渲染安装包 -> dist\ScreenTimeSetup-<版本>-soft.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1 -Backend soft -PayloadExe out\soft\ScreenTime.exe
+```
+
+说明：AWTK 的 CMake 移植漏掉了 `src/lcd/lcd_sdl2.c`（SCons 会自动带上），所以 AGGE 构建
+会在最后链接时缺 `lcd_sdl2_init` / `lcd_sdl2_texture_reset`。`build_awtk_soft.ps1` 会自动调用
+`fix_awtk_soft_link.ps1`：单独编译那个源文件、再用同样的命令重新链接 `awtk.dll`
+（**不修改 AWTK 源码**）。软件渲染版本不申请高分屏标志，AWTK 报的缩放是 1.00，
+所以在 125% 缩放的屏幕上界面会比 GL 版小一圈（但清晰、不模糊）——主力机还是用 GL 版。
+
 ### 2.3 编译 ScreenTime
 
 ```powershell
@@ -107,10 +131,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Extra '-DST_PWD
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1
-# 产物：
-#   dist\ScreenTimeSetup-1.1.2.exe        4.1 MB，Inno Setup 7 做的安装包（含卸载程序）
-#   dist\ScreenTime-1.1.2-portable.zip    2.9 MB，免安装绿色包
+# 产物（GL/OpenGL 版）：
+#   dist\ScreenTimeSetup-1.1.3.exe        4.1 MB，Inno Setup 7 做的安装包（含卸载程序）
+#   dist\ScreenTime-1.1.3-portable.zip    2.9 MB，免安装绿色包
+#
+# 产物（软件渲染版，给没有 OpenGL 的机器）：
+#   dist\ScreenTimeSetup-1.1.3-soft.exe / dist\ScreenTime-1.1.3-portable-soft.zip
 ```
+
+两个安装包的 **AppId 相同**，装到同一个目录，所以"先装 GL 版、再改装 soft 版"就是普通升级，
+`config.dat`/`screenshots`/`logs` 都不会丢。挑选方法很简单：
+
+| 机器 | 用哪个包 |
+|---|---|
+| 普通电脑（有显卡驱动、不是虚拟机/远程桌面） | `ScreenTimeSetup-1.1.3.exe`（GL，界面按 DPI 缩放，文字更大） |
+| 虚拟机 / 远程桌面 / 只有"Microsoft 基本显示适配器" | `ScreenTimeSetup-1.1.3-soft.exe`（软件渲染，不依赖 OpenGL） |
+| 判断方法 | 事件查看器里 `ScreenTime.exe` 崩在 `opengl32.dll`/显卡驱动 DLL，或日志停在 `阶段：界面：tk_init` → 用 soft 版 |
 
 安装包行为：按用户安装（**不需要管理员权限**）、默认装到 `%LOCALAPPDATA%\ScreenTime`、
 升级时沿用原目录且**不会动** `screenshots\logs\config.dat`、可选「开机自动启动」与「桌面快捷方式」、
@@ -289,6 +325,9 @@ logs\activity.jsonl                        # 机读：JSON 行，便于统计
 * 界面依赖 `awtk.dll`（6.1 MB）与 `SDL2.dll`（1.9 MB）：**必须和 exe 放在一起**，
   另外 exe 同级要有 `res\assets\default\raw\styles\default.bin`；开发时若不复制资源，
   程序会回退到编译期写死的 `D:/Work/AWTK/awtk-master/res`。中文字体从系统字体目录读，不打包。
+* **`awtk.dll` 有两种，不能混用**：GL 版（`build_mingw`）需要可用的 OpenGL 3；
+  软件渲染版（`out\awtk_soft`）不依赖任何图形驱动，但没有高分屏缩放（AWTK 报 1.00）。
+  装错包的表现是：要么启动即崩（日志停在 `阶段：界面：tk_init`），要么界面在 125% 屏上偏小。
 * 模型不可达时只记日志（`请求失败（无法连接或超时）`），不影响锁屏计时。
 * 多屏：截图与锁屏都覆盖整个虚拟桌面（`SM_XVIRTUALSCREEN` 等）。
 * 锁屏期间不截图（截了也只是锁屏画面），日志里也不会出现该时间段的识别记录。
@@ -299,11 +338,13 @@ logs\activity.jsonl                        # 机读：JSON 行，便于统计
 
 ```
 VERSION           版本号（安装包与程序内显示都用它）
-build.ps1         gcc 编译 src\*.c -> ScreenTime.exe（-Out 可指定输出路径）
+build.ps1         gcc 编译 src\*.c -> ScreenTime.exe（-Out 指定输出路径，-Backend gl|soft 选渲染后端）
 run.ps1           开发时运行工作区的 exe（把 AWTK 构建目录加进 PATH）
-awtk_env.ps1      AWTK 头文件目录 / 编译宏 / 导入库路径（与 build_mingw 的 build.ninja 对齐）
+awtk_env.ps1      AWTK 头文件目录 / 编译宏 / 导入库路径（从所选构建的 build.ninja 自动解析，保证 ABI 一致）
+build_awtk_soft.ps1   用软件渲染（nanovg AGGE）把 AWTK 编到 out\awtk_soft（给没有 OpenGL 的机器）
+fix_awtk_soft_link.ps1  补上 AWTK CMake 漏掉的 src\lcd\lcd_sdl2.c 并重新链接 awtk.dll（被上一个脚本自动调用）
 installer\        Inno Setup 7 安装包：ScreenTime.iss（UTF-8 带 BOM）+ make_installer.ps1（纯 ASCII 打包脚本）+ README.md
-dist\             安装包产物：ScreenTimeSetup-<版本>.exe / ScreenTime-<版本>-portable.zip
+dist\             安装包产物：ScreenTimeSetup-<版本>.exe / -soft.exe，ScreenTime-<版本>-portable.zip / -portable-soft.zip
 src/main.c        入口、会话计时、截图线程（含截图总开关）、单实例、清理过期截图、配置迁移
 src/ui.h          UI 层接口：UiInit / UiRun / UiShutdown / LockBegin / LockEnd / LockIsActive
 src/ui_awtk.c     AWTK 界面层：状态页/家长验证/设置表单/识别与密码/锁屏页、托盘、全屏锁屏、Win32<->AWTK 桥接

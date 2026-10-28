@@ -3,15 +3,23 @@
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1 -Out <path\to\ScreenTime.exe>
+#   powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1 -Backend soft -Out out\soft\ScreenTime.exe
+#       (soft = AWTK software renderer, runs on machines WITHOUT OpenGL; needs build_awtk_soft.ps1)
 param(
     [string[]]$Extra = @(),
-    [string]$Out = ''
+    [string]$Out = '',
+    # 'gl' (default, GPU/OpenGL) or 'soft' (software renderer, no OpenGL needed)
+    [ValidateSet('gl','soft')]
+    [string]$Backend = 'gl'
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
+$env:AWTK_BACKEND = $Backend
+
 . (Join-Path $root 'awtk_env.ps1')
 if (-not (Test-Path $AwtkLib)) { throw "AWTK import library not found: $AwtkLib (build AWTK first, see README)" }
+Write-Host ("AWTK backend : {0} ({1})" -f $AwtkBackend, $AwtkBuild)
 
 $gcc = 'D:\w64devkit\bin\gcc.exe'
 if (-not (Test-Path $gcc)) {

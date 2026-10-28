@@ -20,7 +20,12 @@ param(
     [switch]$SkipPortable,
     # Optional: package this ScreenTime.exe instead of <project root>\ScreenTime.exe.
     # Useful when the exe was built elsewhere, e.g. build.ps1 -Out out\ScreenTime.exe
-    [string]$PayloadExe = ''
+    [string]$PayloadExe = '',
+    # Which AWTK build to package: 'gl' (GPU/OpenGL, default) or 'soft' (software
+    # renderer, runs on machines without OpenGL). The soft installer is written to
+    # dist\ScreenTimeSetup-<version>-soft.exe so the two never get mixed up.
+    [ValidateSet('gl','soft')]
+    [string]$Backend = 'gl'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,7 +52,11 @@ $IsccExe      = 'C:\Program Files\Inno Setup 7\ISCC.exe'
 $SevenZipExe  = 'C:\Program Files\7-Zip\7z.exe'
 $AwtkRoot     = 'D:\Work\AWTK\awtk-master'
 
-$DefaultVersion = '1.1.2'
+# Which AWTK build provides awtk.dll / SDL2.dll: ask awtk_env.ps1 (single source of truth).
+$env:AWTK_BACKEND = $Backend
+. (Join-Path $ProjectRoot 'awtk_env.ps1')
+
+$DefaultVersion = '1.1.3'
 $ScaleDirs      = @('x1', 'x2', 'x3', 'x4')
 
 # ---------------------------------------------------------------------------
@@ -145,6 +154,16 @@ while ($verParts.Count -lt 4) { $verParts += '0' }
 $ProductVersion = ($verParts[0..3] -join '.')
 Write-Ok "version: $Version (file version $ProductVersion)"
 
+# The two builds install to the same place (same AppId) but get different file names
+# so it is obvious which one you are looking at.
+$OutBaseName = "ScreenTimeSetup-$Version"
+$ZipBaseName = "ScreenTime-$Version-portable"
+if ($Backend -eq 'soft') {
+    $OutBaseName += '-soft'
+    $ZipBaseName += '-soft'
+}
+Write-Ok "package name: $OutBaseName.exe (AWTK backend: $Backend)"
+
 # ---------------------------------------------------------------------------
 # 3. Payload source check
 # ---------------------------------------------------------------------------
@@ -154,8 +173,8 @@ $missing = New-Object System.Collections.Generic.List[string]
 
 $flatSources = @(
     @{ Path = $PayloadExe;                                                           Dest = 'ScreenTime.exe' },
-    @{ Path = (Join-Path $AwtkRoot 'build_mingw\awtk.dll');                           Dest = 'awtk.dll' },
-    @{ Path = (Join-Path $AwtkRoot 'build_mingw\third_party\SDL2\SDL2.dll');          Dest = 'SDL2.dll' },
+    @{ Path = (Join-Path $AwtkBuild 'awtk.dll');                                      Dest = 'awtk.dll' },
+    @{ Path = (Join-Path $AwtkBuild 'third_party\SDL2\SDL2.dll');                     Dest = 'SDL2.dll' },
     @{ Path = (Join-Path $AwtkRoot 'res\assets\default\raw\styles\default.bin');      Dest = 'res\assets\default\raw\styles\default.bin' }
 )
 
@@ -215,7 +234,7 @@ if (-not (Test-Path -LiteralPath $DistDir -PathType Container)) {
     New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 }
 
-$OutExe = Join-Path $DistDir "ScreenTimeSetup-$Version.exe"
+$OutExe = Join-Path $DistDir "$OutBaseName.exe"
 if (Test-Path -LiteralPath $OutExe) {
     Remove-Item -LiteralPath $OutExe -Force
 }
@@ -225,7 +244,9 @@ $isccArgs = @(
     "/DAppVersion4=$ProductVersion",
     "/DPayloadDir=$PayloadDir",
     "/DAwtkDir=$AwtkRoot",
+    "/DAwtkBuild=$AwtkBuild",
     "/O$DistDir",
+    "/F$OutBaseName",
     $IssFile
 )
 
@@ -291,7 +312,7 @@ $ZipPath = $null
 if (-not $SkipPortable) {
     Write-Step 'Building portable zip'
 
-    $ZipPath = Join-Path $DistDir "ScreenTime-$Version-portable.zip"
+    $ZipPath = Join-Path $DistDir "$ZipBaseName.zip"
     $stage   = Join-Path $DistDir '_portable_stage'
 
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
@@ -302,8 +323,8 @@ if (-not $SkipPortable) {
     New-Item -ItemType Directory -Force -Path (Join-Path $stageResRaw 'styles') | Out-Null
 
     Copy-Item -LiteralPath $PayloadExe -Destination $stage -Force
-    Copy-Item -LiteralPath (Join-Path $AwtkRoot 'build_mingw\awtk.dll') -Destination $stage -Force
-    Copy-Item -LiteralPath (Join-Path $AwtkRoot 'build_mingw\third_party\SDL2\SDL2.dll') -Destination $stage -Force
+    Copy-Item -LiteralPath (Join-Path $AwtkBuild 'awtk.dll') -Destination $stage -Force
+    Copy-Item -LiteralPath (Join-Path $AwtkBuild 'third_party\SDL2\SDL2.dll') -Destination $stage -Force
     Copy-Item -LiteralPath (Join-Path $AwtkRoot 'res\assets\default\raw\styles\default.bin') -Destination (Join-Path $stageResRaw 'styles') -Force
 
     foreach ($scale in $ScaleDirs) {
