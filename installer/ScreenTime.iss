@@ -19,10 +19,10 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.1.3"
+  #define AppVersion "1.1.4"
 #endif
 #ifndef AppVersion4
-  #define AppVersion4 "1.1.3.0"
+  #define AppVersion4 "1.1.4.0"
 #endif
 #ifndef PayloadDir
   #define PayloadDir "D:\Work\ScreenTime"
@@ -34,6 +34,11 @@
 ; 由 make_installer.ps1 通过 /DAwtkBuild=... 传进来；这里给个默认值保证手工调 ISCC 也能编译。
 #ifndef AwtkBuild
   #define AwtkBuild AwtkDir + "\build_mingw"
+#endif
+; 合体包（/DBundle=1 + /DBundleDir=<staging>）：一个包里同时放 gl\ 和 soft\ 两套后端 +
+; 启动器，安装后由启动器在运行时探测 OpenGL 选择后端。
+#ifndef BundleDir
+  #define BundleDir ""
 #endif
 
 #define AppName "屏幕使用时间管理"
@@ -103,7 +108,12 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; \
       GroupDescription: "附加选项："; Flags: unchecked
 
 [Files]
-; 程序本体
+#ifdef Bundle
+; 合体包：{app}\ScreenTime.exe 是启动器，gl\ 和 soft\ 各放一套后端（由启动器运行时选择）
+Source: "{#BundleDir}\*"; DestDir: "{app}"; \
+        Flags: ignoreversion recursesubdirs createallsubdirs
+#else
+; 单后端包：程序本体
 Source: "{#PayloadDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#AwtkBuild}\awtk.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#AwtkBuild}\third_party\SDL2\SDL2.dll"; DestDir: "{app}"; Flags: ignoreversion
@@ -118,6 +128,19 @@ Source: "{#AwtkDir}\res\assets\default\raw\images\x3\cursor*.png"; \
         DestDir: "{app}\res\assets\default\raw\images\x3"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#AwtkDir}\res\assets\default\raw\images\x4\cursor*.png"; \
         DestDir: "{app}\res\assets\default\raw\images\x4"; Flags: ignoreversion skipifsourcedoesntexist
+#endif
+
+[InstallDelete]
+#ifdef Bundle
+; 从旧版"单后端"布局升级上来时，根目录的旧后端文件留着只会混淆，装前清掉
+Type: files; Name: "{app}\awtk.dll"
+Type: files; Name: "{app}\SDL2.dll"
+Type: filesandordirs; Name: "{app}\res"
+#else
+; 从合体包降到单后端包时，清掉不再使用的后端子目录
+Type: filesandordirs; Name: "{app}\gl"
+Type: filesandordirs; Name: "{app}\soft"
+#endif
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; \

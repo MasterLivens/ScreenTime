@@ -15,21 +15,28 @@
 工具位置：`C:\Program Files\Inno Setup 7\ISCC.exe`（命令行编译器，7.1.0）。
 中文界面用的是 Inno 自带的 `Languages\ChineseSimplified.isl`，不需要额外下载语言包。
 
-## 两种包（GL / 软件渲染）
+## 默认包：一个包自适应 GL / 软件渲染
 
-| 包 | 用途 |
-|---|---|
-| `ScreenTimeSetup-<版本>.exe` | GL/OpenGL 版，普通电脑用（界面按 DPI 缩放） |
-| `ScreenTimeSetup-<版本>-soft.exe` | **软件渲染**版，给没有 OpenGL 的机器（虚拟机 / 远程桌面 / 基本显示适配器） |
+`-Backend auto`（默认）打出来的包装好后是：
+
+```
+{app}\ScreenTime.exe         启动器（探测 OpenGL，然后拉起 gl 或 soft 后端）
+{app}\gl\ScreenTime.exe      AWTK OpenGL 构建
+{app}\soft\ScreenTime.exe    AWTK 软件渲染构建（没有 OpenGL 时用）
+{app}\config.dat / logs\ / screenshots\    两个后端共用
+```
 
 ```powershell
-# GL 版（默认）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1 -PayloadExe out\gl\ScreenTime.exe
-# 软件渲染版（先跑 .\build_awtk_soft.ps1，再 build.ps1 -Backend soft）
+# 默认：合体包（缺的后端 exe / 启动器会自动编译）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1
+# 只带一个后端的包（排查或特殊场合用）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1 -Backend gl   -PayloadExe out\gl\ScreenTime.exe
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1 -Backend soft -PayloadExe out\soft\ScreenTime.exe
 ```
 
-两个包的 `AppId` 相同、装到同一目录，所以互相覆盖安装就是普通升级，个人数据不受影响。
+`-Backend auto` 需要 `out\awtk_soft\awtk.dll`（先跑 `.\build_awtk_soft.ps1`）。
+三种包的 `AppId` 相同、都装到同一目录，所以互相覆盖安装就是普通升级，个人数据不受影响；
+`.iss` 的 `[InstallDelete]` 会顺手清掉另一种布局的残留（根目录的 `awtk.dll`/`res`，或 `gl\`/`soft\`）。
 
 ## 怎么打包
 

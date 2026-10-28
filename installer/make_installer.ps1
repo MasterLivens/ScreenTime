@@ -21,11 +21,14 @@ param(
     # Optional: package this ScreenTime.exe instead of <project root>\ScreenTime.exe.
     # Useful when the exe was built elsewhere, e.g. build.ps1 -Out out\ScreenTime.exe
     [string]$PayloadExe = '',
-    # Which AWTK build to package: 'gl' (GPU/OpenGL, default) or 'soft' (software
-    # renderer, runs on machines without OpenGL). The soft installer is written to
-    # dist\ScreenTimeSetup-<version>-soft.exe so the two never get mixed up.
-    [ValidateSet('gl','soft')]
-    [string]$Backend = 'gl'
+    # Which AWTK build to package:
+    #   'auto' (default) -> ONE package with both backends (gl\ and soft\) plus a tiny
+    #                       launcher that probes OpenGL at startup and picks one.
+    #   'gl'             -> single-backend package, GPU/OpenGL only
+    #   'soft'           -> single-backend package, software renderer only
+    #                       (output name gets a -soft suffix)
+    [ValidateSet('auto','gl','soft')]
+    [string]$Backend = 'auto'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,11 +55,25 @@ $IsccExe      = 'C:\Program Files\Inno Setup 7\ISCC.exe'
 $SevenZipExe  = 'C:\Program Files\7-Zip\7z.exe'
 $AwtkRoot     = 'D:\Work\AWTK\awtk-master'
 
-# Which AWTK build provides awtk.dll / SDL2.dll: ask awtk_env.ps1 (single source of truth).
-$env:AWTK_BACKEND = $Backend
-. (Join-Path $ProjectRoot 'awtk_env.ps1')
+# 'auto' bundles BOTH backends + the launcher:
+#   {app}\ScreenTime.exe        <- launcher (probes OpenGL, picks a backend)
+#   {app}\gl\ScreenTime.exe     <- AWTK OpenGL build
+#   {app}\soft\ScreenTime.exe   <- AWTK software-renderer build
+$AutoBundle = ($Backend -eq 'auto')
+$GlBuildDir = Join-Path $AwtkRoot 'build_mingw'
+$SoftBuildDir = Join-Path $ProjectRoot 'out\awtk_soft'
 
-$DefaultVersion = '1.1.3'
+if ($AutoBundle) {
+    # awtk_env.ps1 is not needed for the bundle; we use both build trees explicitly.
+    $AwtkBuild = $GlBuildDir
+    $AwtkBackend = 'auto(gl+soft)'
+} else {
+    # Which AWTK build provides awtk.dll / SDL2.dll: ask awtk_env.ps1 (single source of truth).
+    $env:AWTK_BACKEND = $Backend
+    . (Join-Path $ProjectRoot 'awtk_env.ps1')
+}
+
+$DefaultVersion = '1.1.4'
 $ScaleDirs      = @('x1', 'x2', 'x3', 'x4')
 
 # ---------------------------------------------------------------------------
@@ -78,6 +95,44 @@ function Stop-Build {
     Write-Host ''
     Write-Host "ERROR: $Message" -ForegroundColor Red
     exit 1
+}
+
+function Ensure-AppExe {
+    param([string]$BuildBackend, [string]$Path)
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { return }
+    Write-Host ("    building missing {0} backend exe ..." -f $BuildBackend) -ForegroundColor DarkGray
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'build.ps1') -Backend $BuildBackend -Out $Path
+    if ($LASTEXITCODE -ne 0) { Stop-Build ("build.ps1 -Backend {0} failed" -f $BuildBackend) }
+}
+
+# {app}\ScreenTime.exe (launcher) + {app}\gl\... + {app}\soft\...
+function New-BundleStaging {
+    param([string]$LauncherExe, [string]$GlExe, [string]$GlAwtk, [string]$SoftExe, [string]$SoftAwtk, [string]$OutDir)
+
+    if (Test-Path -LiteralPath $OutDir) { Remove-Item -LiteralPath $OutDir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    Copy-Item -LiteralPath $LauncherExe -Destination $OutDir -Force
+
+    $backends = @(
+        @{ name = 'gl';   exe = $GlExe;   awtk = $GlAwtk },
+        @{ name = 'soft'; exe = $SoftExe; awtk = $SoftAwtk }
+    )
+    foreach ($be in $backends) {
+        $dir = Join-Path $OutDir $be.name
+        $resRaw = Join-Path $dir 'res\assets\default\raw'
+        New-Item -ItemType Directory -Force -Path (Join-Path $resRaw 'styles') | Out-Null
+        Copy-Item -LiteralPath $be.exe -Destination $dir -Force
+        Copy-Item -LiteralPath (Join-Path $be.awtk 'awtk.dll') -Destination $dir -Force
+        Copy-Item -LiteralPath (Join-Path $be.awtk 'third_party\SDL2\SDL2.dll') -Destination $dir -Force
+        Copy-Item -LiteralPath (Join-Path $AwtkRoot 'res\assets\default\raw\styles\default.bin') `
+                  -Destination (Join-Path $resRaw 'styles') -Force
+        foreach ($scale in $ScaleDirs) {
+            $dst = Join-Path $resRaw ("images\" + $scale)
+            New-Item -ItemType Directory -Force -Path $dst | Out-Null
+            Copy-Item -Path (Join-Path $AwtkRoot ("res\assets\default\raw\images\" + $scale + '\cursor*.png')) `
+                      -Destination $dst -Force
+        }
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -165,18 +220,66 @@ if ($Backend -eq 'soft') {
 Write-Ok "package name: $OutBaseName.exe (AWTK backend: $Backend)"
 
 # ---------------------------------------------------------------------------
+# 2b. Bundle mode: build missing exes and assemble the two-backend staging tree
+# ---------------------------------------------------------------------------
+$StagingDir = $null
+if ($AutoBundle) {
+    Write-Step 'Preparing bundle (launcher + gl + soft backends)'
+
+    if (-not (Test-Path -LiteralPath (Join-Path $SoftBuildDir 'awtk.dll') -PathType Leaf)) {
+        Stop-Build ("software AWTK build missing: {0}\awtk.dll (run .\build_awtk_soft.ps1 first)" -f $SoftBuildDir)
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $GlBuildDir 'awtk.dll') -PathType Leaf)) {
+        Stop-Build ("OpenGL AWTK build missing: {0}\awtk.dll" -f $GlBuildDir)
+    }
+
+    $GlExe    = Join-Path $ProjectRoot 'out\gl\ScreenTime.exe'
+    $SoftExe  = Join-Path $ProjectRoot 'out\soft\ScreenTime.exe'
+    $Launcher = Join-Path $ProjectRoot 'out\launcher\ScreenTime.exe'
+    Ensure-AppExe 'gl'   $GlExe
+    Ensure-AppExe 'soft' $SoftExe
+    if (-not (Test-Path -LiteralPath $Launcher -PathType Leaf)) {
+        Write-Host '    building missing launcher ...' -ForegroundColor DarkGray
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'build_launcher.ps1')
+        if ($LASTEXITCODE -ne 0) { Stop-Build 'build_launcher.ps1 failed' }
+    }
+
+    $StagingDir = Join-Path $DistDir '_bundle'
+    New-BundleStaging -LauncherExe $Launcher -GlExe $GlExe -GlAwtk $GlBuildDir `
+                      -SoftExe $SoftExe -SoftAwtk $SoftBuildDir -OutDir $StagingDir
+    Write-Ok ("staged bundle: {0} ({1} files)" -f $StagingDir, (Get-ChildItem $StagingDir -Recurse -File | Measure-Object).Count)
+
+    $PayloadDir = $StagingDir
+    $PayloadExe = Join-Path $StagingDir 'ScreenTime.exe'
+}
+
+# ---------------------------------------------------------------------------
 # 3. Payload source check
 # ---------------------------------------------------------------------------
 Write-Step 'Checking payload sources'
 
 $missing = New-Object System.Collections.Generic.List[string]
 
-$flatSources = @(
-    @{ Path = $PayloadExe;                                                           Dest = 'ScreenTime.exe' },
-    @{ Path = (Join-Path $AwtkBuild 'awtk.dll');                                      Dest = 'awtk.dll' },
-    @{ Path = (Join-Path $AwtkBuild 'third_party\SDL2\SDL2.dll');                     Dest = 'SDL2.dll' },
-    @{ Path = (Join-Path $AwtkRoot 'res\assets\default\raw\styles\default.bin');      Dest = 'res\assets\default\raw\styles\default.bin' }
-)
+if ($AutoBundle) {
+    $flatSources = @(
+        @{ Path = (Join-Path $StagingDir 'ScreenTime.exe');                Dest = 'ScreenTime.exe (launcher)' },
+        @{ Path = (Join-Path $StagingDir 'gl\ScreenTime.exe');             Dest = 'gl\ScreenTime.exe' },
+        @{ Path = (Join-Path $StagingDir 'gl\awtk.dll');                   Dest = 'gl\awtk.dll' },
+        @{ Path = (Join-Path $StagingDir 'gl\SDL2.dll');                   Dest = 'gl\SDL2.dll' },
+        @{ Path = (Join-Path $StagingDir 'soft\ScreenTime.exe');           Dest = 'soft\ScreenTime.exe' },
+        @{ Path = (Join-Path $StagingDir 'soft\awtk.dll');                 Dest = 'soft\awtk.dll' },
+        @{ Path = (Join-Path $StagingDir 'soft\SDL2.dll');                 Dest = 'soft\SDL2.dll' },
+        @{ Path = (Join-Path $StagingDir 'gl\res\assets\default\raw\styles\default.bin');   Dest = 'gl\res\...\default.bin' },
+        @{ Path = (Join-Path $StagingDir 'soft\res\assets\default\raw\styles\default.bin'); Dest = 'soft\res\...\default.bin' }
+    )
+} else {
+    $flatSources = @(
+        @{ Path = $PayloadExe;                                                           Dest = 'ScreenTime.exe' },
+        @{ Path = (Join-Path $AwtkBuild 'awtk.dll');                                      Dest = 'awtk.dll' },
+        @{ Path = (Join-Path $AwtkBuild 'third_party\SDL2\SDL2.dll');                     Dest = 'SDL2.dll' },
+        @{ Path = (Join-Path $AwtkRoot 'res\assets\default\raw\styles\default.bin');      Dest = 'res\assets\default\raw\styles\default.bin' }
+    )
+}
 
 foreach ($item in $flatSources) {
     if (Test-Path -LiteralPath $item.Path -PathType Leaf) {
@@ -249,6 +352,20 @@ $isccArgs = @(
     "/F$OutBaseName",
     $IssFile
 )
+if ($AutoBundle) {
+    $isccArgs = @(
+        "/DAppVersion=$Version",
+        "/DAppVersion4=$ProductVersion",
+        "/DPayloadDir=$PayloadDir",
+        "/DAwtkDir=$AwtkRoot",
+        "/DAwtkBuild=$AwtkBuild",
+        "/DBundle=1",
+        "/DBundleDir=$StagingDir",
+        "/O$DistDir",
+        "/F$OutBaseName",
+        $IssFile
+    )
+}
 
 Write-Host ("    `"$IsccExe`" {0}" -f ($isccArgs -join ' ')) -ForegroundColor DarkGray
 Write-Host ''
@@ -286,6 +403,9 @@ $problems = New-Object System.Collections.Generic.List[string]
 $packedText = ($packed -join "`n")
 
 $requiredNames = @('ScreenTime.exe', 'awtk.dll', 'SDL2.dll', 'default.bin')
+if ($AutoBundle) {
+    $requiredNames += @('gl\awtk.dll', 'soft\awtk.dll', 'gl\SDL2.dll', 'soft\SDL2.dll')
+}
 foreach ($req in $requiredNames) {
     if ($packedText -notmatch [regex]::Escape($req)) { $problems.Add("package is missing: $req") }
 }
@@ -318,23 +438,28 @@ if (-not $SkipPortable) {
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
 
-    $stageResRaw = Join-Path $stage 'res\assets\default\raw'
-    New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $stageResRaw 'styles') | Out-Null
+    if ($AutoBundle) {
+        # The bundle staging tree IS the portable layout (launcher + gl\ + soft\).
+        Compress-Archive -Path (Join-Path $StagingDir '*') -DestinationPath $ZipPath -CompressionLevel Optimal -Force
+    } else {
+        $stageResRaw = Join-Path $stage 'res\assets\default\raw'
+        New-Item -ItemType Directory -Force -Path $stage | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $stageResRaw 'styles') | Out-Null
 
-    Copy-Item -LiteralPath $PayloadExe -Destination $stage -Force
-    Copy-Item -LiteralPath (Join-Path $AwtkBuild 'awtk.dll') -Destination $stage -Force
-    Copy-Item -LiteralPath (Join-Path $AwtkBuild 'third_party\SDL2\SDL2.dll') -Destination $stage -Force
-    Copy-Item -LiteralPath (Join-Path $AwtkRoot 'res\assets\default\raw\styles\default.bin') -Destination (Join-Path $stageResRaw 'styles') -Force
+        Copy-Item -LiteralPath $PayloadExe -Destination $stage -Force
+        Copy-Item -LiteralPath (Join-Path $AwtkBuild 'awtk.dll') -Destination $stage -Force
+        Copy-Item -LiteralPath (Join-Path $AwtkBuild 'third_party\SDL2\SDL2.dll') -Destination $stage -Force
+        Copy-Item -LiteralPath (Join-Path $AwtkRoot 'res\assets\default\raw\styles\default.bin') -Destination (Join-Path $stageResRaw 'styles') -Force
 
-    foreach ($scale in $ScaleDirs) {
-        $destDir = Join-Path $stageResRaw ("images\" + $scale)
-        New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-        Copy-Item -Path (Join-Path $AwtkRoot ("res\assets\default\raw\images\" + $scale + '\cursor*.png')) -Destination $destDir -Force
+        foreach ($scale in $ScaleDirs) {
+            $destDir = Join-Path $stageResRaw ("images\" + $scale)
+            New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+            Copy-Item -Path (Join-Path $AwtkRoot ("res\assets\default\raw\images\" + $scale + '\cursor*.png')) -Destination $destDir -Force
+        }
+
+        Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $ZipPath -CompressionLevel Optimal -Force
+        Remove-Item -LiteralPath $stage -Recurse -Force
     }
-
-    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $ZipPath -CompressionLevel Optimal -Force
-    Remove-Item -LiteralPath $stage -Recurse -Force
 
     if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
         Stop-Build "portable zip was not created: $ZipPath"

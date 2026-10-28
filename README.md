@@ -131,22 +131,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Extra '-DST_PWD
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1
-# 产物（GL/OpenGL 版）：
-#   dist\ScreenTimeSetup-1.1.3.exe        4.1 MB，Inno Setup 7 做的安装包（含卸载程序）
-#   dist\ScreenTime-1.1.3-portable.zip    2.9 MB，免安装绿色包
+# 产物（默认 -Backend auto：一个包自适应所有机器）：
+#   dist\ScreenTimeSetup-1.1.3.exe        4.5 MB，Inno Setup 7 安装包（含卸载程序）
+#   dist\ScreenTime-1.1.3-portable.zip    6.0 MB，免安装绿色包
 #
-# 产物（软件渲染版，给没有 OpenGL 的机器）：
-#   dist\ScreenTimeSetup-1.1.3-soft.exe / dist\ScreenTime-1.1.3-portable-soft.zip
+# 也可以只打单后端的包（一般不需要）：
+#   -Backend gl   -> dist\ScreenTimeSetup-<版本>.exe        （只有 OpenGL 后端）
+#   -Backend soft -> dist\ScreenTimeSetup-<版本>-soft.exe   （只有软件渲染后端）
 ```
 
-两个安装包的 **AppId 相同**，装到同一个目录，所以"先装 GL 版、再改装 soft 版"就是普通升级，
-`config.dat`/`screenshots`/`logs` 都不会丢。挑选方法很简单：
+**默认包是自适应环境的**：安装后目录长这样——
 
-| 机器 | 用哪个包 |
-|---|---|
-| 普通电脑（有显卡驱动、不是虚拟机/远程桌面） | `ScreenTimeSetup-1.1.3.exe`（GL，界面按 DPI 缩放，文字更大） |
-| 虚拟机 / 远程桌面 / 只有"Microsoft 基本显示适配器" | `ScreenTimeSetup-1.1.3-soft.exe`（软件渲染，不依赖 OpenGL） |
-| 判断方法 | 事件查看器里 `ScreenTime.exe` 崩在 `opengl32.dll`/显卡驱动 DLL，或日志停在 `阶段：界面：tk_init` → 用 soft 版 |
+```
+%LOCALAPPDATA%\ScreenTime\
+  ScreenTime.exe      ← 启动器（几十毫秒，探测 OpenGL 后拉起下面某个后端，然后自己退出）
+  gl\ScreenTime.exe   ← AWTK OpenGL 构建（有可用 OpenGL 3 时用，界面按 DPI 缩放）
+  soft\ScreenTime.exe ← AWTK 软件渲染构建（没有 OpenGL 时用，完全不碰显卡驱动）
+  config.dat, screenshots\, logs\   ← 两个后端共用同一份配置与数据
+```
+
+启动器会建一个隐藏窗口 + 临时 OpenGL 上下文读 `GL_VERSION`：主版本 ≥ 3 就走 `gl\`，
+否则（或创建上下文失败）自动落到 `soft\`。探测和启动过程**都不会弹窗/崩溃**，
+选了哪个后端写进 `logs\launcher.log`：
+
+```
+[2026-10-28 14:15:13] 启动器: OpenGL 探测: GL_VERSION="4.6.0 - Build 32.0.101.7085" -> 可用 GL 后端
+[2026-10-28 14:15:13] 启动器: 已启动 gl 后端
+```
+
+想手动强制看另一个后端：`ScreenTime.exe --backend soft`（或 `--backend gl`）。
+只有"两个后端目录都缺失"时才会弹一次错误提示。
 
 安装包行为：按用户安装（**不需要管理员权限**）、默认装到 `%LOCALAPPDATA%\ScreenTime`、
 升级时沿用原目录且**不会动** `screenshots\logs\config.dat`、可选「开机自动启动」与「桌面快捷方式」、
@@ -343,6 +357,8 @@ run.ps1           开发时运行工作区的 exe（把 AWTK 构建目录加进 
 awtk_env.ps1      AWTK 头文件目录 / 编译宏 / 导入库路径（从所选构建的 build.ninja 自动解析，保证 ABI 一致）
 build_awtk_soft.ps1   用软件渲染（nanovg AGGE）把 AWTK 编到 out\awtk_soft（给没有 OpenGL 的机器）
 fix_awtk_soft_link.ps1  补上 AWTK CMake 漏掉的 src\lcd\lcd_sdl2.c 并重新链接 awtk.dll（被上一个脚本自动调用）
+launcher\launcher.c   启动器源码：探测 OpenGL 后拉起 gl\ 或 soft\ 后端（自适应安装包用）
+build_launcher.ps1    编译启动器 -> out\launcher\ScreenTime.exe
 installer\        Inno Setup 7 安装包：ScreenTime.iss（UTF-8 带 BOM）+ make_installer.ps1（纯 ASCII 打包脚本）+ README.md
 dist\             安装包产物：ScreenTimeSetup-<版本>.exe / -soft.exe，ScreenTime-<版本>-portable.zip / -portable-soft.zip
 src/main.c        入口、会话计时、截图线程（含截图总开关）、单实例、清理过期截图、配置迁移
