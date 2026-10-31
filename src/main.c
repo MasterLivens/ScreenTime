@@ -129,15 +129,25 @@ void SessionReset(LONGLONG lenMs, const WCHAR *reason)
  *           之后人回来 -> idle_reset=1 时"重新开始计时"（新会话满时长），
  *                         idle_reset=0 时接着之前的剩余时间继续。
  *   ④ 其余：正常倒计时，到点锁屏。 */
+/* ---------------- 清理过期截图 ---------------- */
+static void CleanupOldShots(void);
+
 void SessionTick(void)
 {
     LONGLONG now, idleMs, remain, idlePauseMs;
     int paused;
     static int loggedIdle = 0;
-
-    if (g_locked) return;
+    static LONGLONG lastCleanup = 0;
 
     now = (LONGLONG)GetTickCount64();
+
+    /* 每小时清一次旧截图（只删"超过保留天数"和"超过总量上限"的，逐天整删） */
+    if (lastCleanup == 0 || (now - lastCleanup) >= 3600LL * 1000LL) {
+        lastCleanup = now;
+        CleanupOldShots();
+    }
+
+    if (g_locked) return;
 
     /* ② 窗口化的视频在播 -> 算作活动，刷新空闲计时器。
          全屏时不刷新：否则"最近没人操作"这个条件永远达不到，观影模式就进不去了。 */
@@ -282,64 +292,173 @@ static unsigned int __stdcall VisionThread(void *arg)
     return 0;
 }
 
-/* ---------------- 清理过期截图 ---------------- */
-static void CleanupOldShots(void)
+/* ---------------- 清理过期截图 ----------------
+ *
+ * 两种清理一起做：
+ *   ① 超过 keep_days 天的日期目录整天空删（按日期名判断，不依赖文件时间）
+ *   ② 总量超过 screenshots_max_mb 时，从最旧的日期目录开始删，直到降到上限以下
+ *
+ * 只在启动时跑一次是不够的：程序可能连续运行几周，旧截图会一直堆着。
+ * 所以启动时跑一次，之后每小时再跑一次（见 SessionTick）。 */
+
+#define ST_MAX_DAYDIRS 4000
+
+typedef struct {
+    WCHAR name[16];
+    int   key;                  /* yyyymmdd，用来排序/比较 */
+    unsigned long long bytes;
+    int   files;
+} DayDir;
+
+/* 收集 screenshots\<yyyy-mm-dd>\ 目录及各自大小；返回个数 */
+static int CollectDayDirs(DayDir *out, int max)
 {
-    if (g_cfg.keep_days <= 0) return;
-
-    SYSTEMTIME st;
-    GetLocalTime(&st);
-    FILETIME ft;
-    SystemTimeToFileTime(&st, &ft);
-    LONGLONG t100 = ((LONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-    t100 -= (LONGLONG)g_cfg.keep_days * 24 * 3600 * 10000000LL;
-    ft.dwLowDateTime = (DWORD)(t100 & 0xFFFFFFFF);
-    ft.dwHighDateTime = (DWORD)(t100 >> 32);
-    FileTimeToSystemTime(&ft, &st);
-    int cutoff = st.wYear * 10000 + st.wMonth * 100 + st.wDay;
-
     WCHAR pat[MAX_PATH];
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    int n = 0;
+
     StringCchCopyW(pat, MAX_PATH, g_shotDir);
     StringCchCatW(pat, MAX_PATH, L"\\*");
-
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(pat, &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
+    h = FindFirstFileW(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
 
     do {
+        WCHAR sub[MAX_PATH], inner[MAX_PATH];
+        WIN32_FIND_DATAW f2;
+        HANDLE h2;
+        int y, m, d;
+
         if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
         if (fd.cFileName[0] == L'.') continue;
         if (wcslen(fd.cFileName) != 10) continue;
-        int y = _wtoi(fd.cFileName);
-        int m = _wtoi(fd.cFileName + 5);
-        int d = _wtoi(fd.cFileName + 8);
+        y = _wtoi(fd.cFileName);
+        m = _wtoi(fd.cFileName + 5);
+        d = _wtoi(fd.cFileName + 8);
         if (y < 2000 || m < 1 || m > 12 || d < 1 || d > 31) continue;
-        if (y * 10000 + m * 100 + d >= cutoff) continue;
+        if (n >= max) break;
 
-        WCHAR sub[MAX_PATH];
         StringCchCopyW(sub, MAX_PATH, g_shotDir);
         StringCchCatW(sub, MAX_PATH, L"\\");
         StringCchCatW(sub, MAX_PATH, fd.cFileName);
 
-        WCHAR inner[MAX_PATH];
+        out[n].bytes = 0;
+        out[n].files = 0;
+        out[n].key = y * 10000 + m * 100 + d;
+        StringCchCopyW(out[n].name, 16, fd.cFileName);
+
         StringCchCopyW(inner, MAX_PATH, sub);
         StringCchCatW(inner, MAX_PATH, L"\\*");
-        WIN32_FIND_DATAW f2;
-        HANDLE h2 = FindFirstFileW(inner, &f2);
+        h2 = FindFirstFileW(inner, &f2);
         if (h2 != INVALID_HANDLE_VALUE) {
             do {
                 if (f2.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-                WCHAR fp[MAX_PATH];
-                StringCchCopyW(fp, MAX_PATH, sub);
-                StringCchCatW(fp, MAX_PATH, L"\\");
-                StringCchCatW(fp, MAX_PATH, f2.cFileName);
-                DeleteFileW(fp);
+                out[n].bytes += ((unsigned long long)f2.nFileSizeHigh << 32) | f2.nFileSizeLow;
+                out[n].files++;
             } while (FindNextFileW(h2, &f2));
             FindClose(h2);
         }
-        RemoveDirectoryW(sub);
+        n++;
     } while (FindNextFileW(h, &fd));
     FindClose(h);
+
+    /* 按日期从旧到新排序（插入排序，目录数不多） */
+    for (int i = 1; i < n; i++) {
+        DayDir tmp = out[i];
+        int j = i - 1;
+        while (j >= 0 && out[j].key > tmp.key) { out[j + 1] = out[j]; j--; }
+        out[j + 1] = tmp;
+    }
+    return n;
+}
+
+static void DeleteDayDir(const DayDir *dir)
+{
+    WCHAR sub[MAX_PATH], inner[MAX_PATH];
+    WIN32_FIND_DATAW f2;
+    HANDLE h2;
+
+    StringCchCopyW(sub, MAX_PATH, g_shotDir);
+    StringCchCatW(sub, MAX_PATH, L"\\");
+    StringCchCatW(sub, MAX_PATH, dir->name);
+
+    StringCchCopyW(inner, MAX_PATH, sub);
+    StringCchCatW(inner, MAX_PATH, L"\\*");
+    h2 = FindFirstFileW(inner, &f2);
+    if (h2 != INVALID_HANDLE_VALUE) {
+        do {
+            WCHAR fp[MAX_PATH];
+            if (f2.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            StringCchCopyW(fp, MAX_PATH, sub);
+            StringCchCatW(fp, MAX_PATH, L"\\");
+            StringCchCatW(fp, MAX_PATH, f2.cFileName);
+            DeleteFileW(fp);
+        } while (FindNextFileW(h2, &f2));
+        FindClose(h2);
+    }
+    RemoveDirectoryW(sub);
+}
+
+static void CleanupOldShots(void)
+{
+    static DayDir days[ST_MAX_DAYDIRS];
+    int n, removedDays = 0, removedFiles = 0;
+    unsigned long long removedBytes = 0, total = 0;
+    unsigned long long capBytes;
+    int cutoff;
+    SYSTEMTIME st;
+    FILETIME ft;
+    LONGLONG t100;
+
+    if (g_cfg.keep_days <= 0 && g_cfg.screenshots_max_mb <= 0) return;
+
+    GetLocalTime(&st);
+    SystemTimeToFileTime(&st, &ft);
+    t100 = ((LONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    t100 -= (LONGLONG)g_cfg.keep_days * 24 * 3600 * 10000000LL;
+    ft.dwLowDateTime = (DWORD)(t100 & 0xFFFFFFFF);
+    ft.dwHighDateTime = (DWORD)(t100 >> 32);
+    FileTimeToSystemTime(&ft, &st);
+    cutoff = st.wYear * 10000 + st.wMonth * 100 + st.wDay;
+
+    n = CollectDayDirs(days, ST_MAX_DAYDIRS);
+    if (n <= 0) return;
+
+    /* ① 超过 keep_days 的整天删掉（keep_days<=0 表示不按天数删） */
+    for (int i = 0; i < n; i++) {
+        if (g_cfg.keep_days > 0 && days[i].key < cutoff) {
+            DeleteDayDir(&days[i]);
+            removedDays++;
+            removedFiles += days[i].files;
+            removedBytes += days[i].bytes;
+            days[i].key = -1;              /* 标记为已删 */
+        }
+    }
+
+    /* ② 总量上限：从最旧的开始删（数组已按日期升序） */
+    capBytes = (unsigned long long)g_cfg.screenshots_max_mb * 1024ULL * 1024ULL;
+    if (capBytes > 0) {
+        for (int i = 0; i < n; i++) {
+            if (days[i].key > 0) total += days[i].bytes;
+        }
+        for (int i = 0; i < n && total > capBytes; i++) {
+            if (days[i].key <= 0) continue;
+            DeleteDayDir(&days[i]);
+            removedDays++;
+            removedFiles += days[i].files;
+            removedBytes += days[i].bytes;
+            total -= days[i].bytes;
+            days[i].key = -1;
+        }
+    }
+
+    if (removedDays > 0) {
+        LogEventW(L"清理截图：删除 %d 天共 %d 个文件、%llu MB（保留 %d 天、上限 %d MB，当前约 %llu MB）",
+                  removedDays, removedFiles,
+                  removedBytes / (1024ULL * 1024ULL),
+                  g_cfg.keep_days, g_cfg.screenshots_max_mb,
+                  total / (1024ULL * 1024ULL));
+    }
 }
 
 /* ---------------- 命令行 ---------------- */

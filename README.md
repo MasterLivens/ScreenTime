@@ -279,6 +279,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.p
 | `save_screenshots` | 1 | 0 = 识别完删掉截图（只留文字记录） |
 | `vision_enabled` | 1 | 0 = 不请求模型（只存图） |
 | `keep_days` | 7 | 截图保留天数，0 = 永久 |
+| `screenshots_max_mb` | 1500 | 截图目录**总大小上限**（MB），超出从最旧的日期目录开始整删；0 = 不限 |
 | `max_image_width` | 1280 | 送模型的截图宽度（多屏整屏等比缩放） |
 | `api_url` | `http://192.168.6.220:8177/v1` | OpenAI 兼容地址，自动拼 `/chat/completions` |
 | `model` | `qwen3.8-flash-next-iq3_xxs` | 模型名 |

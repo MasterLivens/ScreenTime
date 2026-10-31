@@ -73,7 +73,7 @@ if ($AutoBundle) {
     . (Join-Path $ProjectRoot 'awtk_env.ps1')
 }
 
-$DefaultVersion = '1.1.7'
+$DefaultVersion = '1.1.8'
 $ScaleDirs      = @('x1', 'x2', 'x3', 'x4')
 
 # ---------------------------------------------------------------------------

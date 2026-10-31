@@ -37,6 +37,7 @@ void ConfigDefaults(Config *c)
     c->wrong_penalty_seconds = 30;
     c->block_hotkeys         = 1;
     c->keep_days             = 7;
+    c->screenshots_max_mb    = 1500;  /* 截图目录最多 1.5 GB，超出从最旧的开始删 */
     c->start_hidden          = 1;
     c->show_tray_icon        = 1;
 }
@@ -73,6 +74,7 @@ static void SetKey(Config *c, const WCHAR *k, const WCHAR *v)
     else if (!_wcsicmp(k, L"wrong_penalty_seconds")) c->wrong_penalty_seconds = AtoiDef(v, c->wrong_penalty_seconds);
     else if (!_wcsicmp(k, L"block_hotkeys"))    c->block_hotkeys = AtoiDef(v, c->block_hotkeys);
     else if (!_wcsicmp(k, L"keep_days"))        c->keep_days = AtoiDef(v, c->keep_days);
+    else if (!_wcsicmp(k, L"screenshots_max_mb")) c->screenshots_max_mb = AtoiDef(v, c->screenshots_max_mb);
     else if (!_wcsicmp(k, L"start_hidden"))     c->start_hidden = AtoiDef(v, c->start_hidden);
     else if (!_wcsicmp(k, L"show_tray_icon"))   c->show_tray_icon = AtoiDef(v, c->show_tray_icon);
 }
@@ -123,6 +125,8 @@ static void ClampConfig(Config *c)
     if (c->wrong_penalty_seconds > 3600) c->wrong_penalty_seconds = 3600;
     if (c->keep_days < 0)            c->keep_days = 0;
     if (c->keep_days > 3650)         c->keep_days = 3650;
+    if (c->screenshots_max_mb < 0)   c->screenshots_max_mb = 0;
+    if (c->screenshots_max_mb > 50000) c->screenshots_max_mb = 50000;
     if (c->pw_iterations < 1000)     c->pw_iterations = 1000;
     if (c->pw_iterations > 500000)   c->pw_iterations = 500000;
 }
@@ -257,6 +261,7 @@ static int BuildIniText(const Config *c, char *out, size_t cap)
         "save_screenshots = %d\n"
         "vision_enabled = %d\n"
         "keep_days = %d\n"
+        "screenshots_max_mb = %d\n"
         "max_image_width = %d\n"
         "api_url = %s\n"
         "model = %s\n"
@@ -276,7 +281,7 @@ static int BuildIniText(const Config *c, char *out, size_t cap)
         c->idle_pause, c->idle_seconds, c->idle_reset, c->video_detect,
         c->video_quiet_seconds, c->penalty,
         c->screenshot_enabled, c->screenshot_interval, c->save_screenshots,
-        c->vision_enabled, c->keep_days, c->max_image_width,
+        c->vision_enabled, c->keep_days, c->screenshots_max_mb, c->max_image_width,
         url, model, key,
         c->wrong_penalty_seconds, c->block_hotkeys, c->start_hidden, c->show_tray_icon,
         c->pw_iterations, hash, salt);

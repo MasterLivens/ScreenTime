@@ -29,6 +29,7 @@ typedef struct {
     int   wrong_penalty_seconds;  /* 密码错误追加的锁屏秒数 */
     int   block_hotkeys;          /* 1=锁屏期间屏蔽 Alt+Tab / Win / Alt+F4 / Ctrl+Esc */
     int   keep_days;              /* 截图保留天数，0=永久 */
+    int   screenshots_max_mb;     /* 截图目录总大小上限（MB），0=不限；超出从最旧的开始删 */
     int   start_hidden;           /* 1=启动时不显示窗口（只在系统图标区域） */
     int   show_tray_icon;         /* 1=显示托盘图标 */
 } Config;
