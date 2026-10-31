@@ -26,7 +26,9 @@ void ConfigDefaults(Config *c)
     c->api_key[0] = 0;
     c->vision_enabled        = 1;
     c->idle_pause            = 1;
-    c->idle_seconds          = 120;
+    c->idle_seconds          = 600;   /* 10 分钟：闲置超过它才算"人不在" */
+    c->idle_reset            = 1;     /* 回来时重新开始计时 */
+    c->video_detect          = 1;     /* 全屏观影时暂停计时且不锁屏 */
     c->penalty               = 1;
     c->warn_minutes          = 5;
     c->save_screenshots      = 1;
@@ -60,6 +62,8 @@ static void SetKey(Config *c, const WCHAR *k, const WCHAR *v)
     else if (!_wcsicmp(k, L"vision_enabled"))   c->vision_enabled = AtoiDef(v, c->vision_enabled);
     else if (!_wcsicmp(k, L"idle_pause"))       c->idle_pause = AtoiDef(v, c->idle_pause);
     else if (!_wcsicmp(k, L"idle_seconds"))     c->idle_seconds = AtoiDef(v, c->idle_seconds);
+    else if (!_wcsicmp(k, L"idle_reset"))       c->idle_reset = AtoiDef(v, c->idle_reset);
+    else if (!_wcsicmp(k, L"video_detect"))     c->video_detect = AtoiDef(v, c->video_detect);
     else if (!_wcsicmp(k, L"penalty"))          c->penalty = AtoiDef(v, c->penalty);
     else if (!_wcsicmp(k, L"warn_minutes"))     c->warn_minutes = AtoiDef(v, c->warn_minutes);
     else if (!_wcsicmp(k, L"save_screenshots")) c->save_screenshots = AtoiDef(v, c->save_screenshots);
@@ -103,6 +107,8 @@ static void ClampConfig(Config *c)
     if (c->screenshot_interval > 3600) c->screenshot_interval = 3600;
     if (c->idle_seconds < 10)        c->idle_seconds = 10;
     if (c->idle_seconds > 7200)      c->idle_seconds = 7200;
+    if (c->idle_reset)               c->idle_reset = 1; else c->idle_reset = 0;
+    if (c->video_detect)             c->video_detect = 1; else c->video_detect = 0;
     if (c->warn_minutes < 0)         c->warn_minutes = 0;
     if (c->warn_minutes > 120)       c->warn_minutes = 120;
     if (c->max_image_width < 320)    c->max_image_width = 320;
@@ -234,6 +240,8 @@ static int BuildIniText(const Config *c, char *out, size_t cap)
         "warn_minutes = %d\n"
         "idle_pause = %d\n"
         "idle_seconds = %d\n"
+        "idle_reset = %d\n"
+        "video_detect = %d\n"
         "penalty = %d\n"
         "\n"
         "; ---- 截图 ----\n"
@@ -258,7 +266,7 @@ static int BuildIniText(const Config *c, char *out, size_t cap)
         "password_hash = %s\n"
         "password_salt = %s\n",
         c->session_minutes, c->break_minutes, c->warn_minutes,
-        c->idle_pause, c->idle_seconds, c->penalty,
+        c->idle_pause, c->idle_seconds, c->idle_reset, c->video_detect, c->penalty,
         c->screenshot_enabled, c->screenshot_interval, c->save_screenshots,
         c->vision_enabled, c->keep_days, c->max_image_width,
         url, model, key,

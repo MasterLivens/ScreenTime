@@ -43,7 +43,8 @@ $flags = @(
     '-mwindows', '-static'
 ) + (Get-AwtkCFlags) + $Extra + $sources + @('-o', $out) + (Get-AwtkLinkFlags) + @(
     '-lgdiplus', '-lwinhttp', '-lgdi32', '-luser32',
-    '-ladvapi32', '-lshell32', '-luuid', '-lbcrypt'
+    '-ladvapi32', '-lshell32', '-luuid', '-lbcrypt',
+    '-lpdh', '-lole32'
 )
 
 Write-Host "Compiling -> $out"

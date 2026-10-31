@@ -1256,8 +1256,9 @@ static void WarnTick(void) {
     lastSec = -1;
   }
 
-  /* 只从状态页进入；家长验证/设置页面开着的时候不打断用户 */
-  want = (!g_locked && !g_warnDismissed && g_cfg.warn_minutes > 0 && remain > 0 &&
+  /* 只从状态页进入；家长验证/设置页面开着的时候不打断用户；
+     观影模式（全屏视频）下也不弹提醒，免得盖住画面 */
+  want = (!g_locked && !g_cinemaMode && !g_warnDismissed && g_cfg.warn_minutes > 0 && remain > 0 &&
           remain <= (LONGLONG)g_cfg.warn_minutes * 60000 &&
           (g_page == PAGE_STATUS || g_page == PAGE_WARN));
 
@@ -1424,7 +1425,9 @@ static void RefreshStatus(void) {
   warning = (g_cfg.warn_minutes > 0 && remain <= (LONGLONG)g_cfg.warn_minutes * 60000);
 
   StringCchPrintfW(head, 160, L"屏幕使用时间管理　%s",
-                   g_locked ? L"（锁屏中）" : (warning ? L"（即将锁屏）" : L"（正常）"));
+                   g_locked ? L"（锁屏中）"
+                            : (g_cinemaMode ? L"（观影模式·暂停计时）"
+                                            : (warning ? L"（即将锁屏）" : L"（正常）")));
   SetTextW(g_lblHead, head);
   widget_set_style_color(g_lblHead, "text_color",
                          warning ? col(255, 120, 120) : col(235, 240, 250));

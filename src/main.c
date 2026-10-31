@@ -13,6 +13,7 @@
 #include "capture.h"
 #include "vision.h"
 #include "hooks.h"
+#include "media.h"
 #include "ui.h"
 
 /* ---------------- 全局状态 ---------------- */
@@ -33,6 +34,7 @@ volatile LONGLONG g_lockEndTick = 0;
 volatile LONG g_locked = 0;
 volatile LONG g_wrongCount = 0;
 volatile LONG g_warned = 0;
+volatile LONG g_cinemaMode = 0;
 volatile LONGLONG g_pendingPenaltyMs = 0;
 
 volatile LONGLONG g_lastShotTick = 0;
@@ -118,18 +120,78 @@ void SessionReset(LONGLONG lenMs, const WCHAR *reason)
     LogEventW(L"新的使用会话开始：允许 %lld 分钟（%s）", lenMs / 60000, reason ? reason : L"");
 }
 
+/* 计时策略（每"秒"调用一次）：
+ *
+ *   ① 观影模式（全屏 + 正在播视频）：不推进计时、不判锁屏 —— 看电影不能被打断。
+ *   ② 视频在播（窗口化）：视为"有活动"，不累计空闲 —— 否则看视频会被当成闲置。
+ *   ③ 空闲：闲置不到 idle_seconds（默认 600 秒 = 10 分钟）-> 照常计时；
+ *           到点 -> 暂停计时；
+ *           之后人回来 -> idle_reset=1 时"重新开始计时"（新会话满时长），
+ *                         idle_reset=0 时接着之前的剩余时间继续。
+ *   ④ 其余：正常倒计时，到点锁屏。 */
 void SessionTick(void)
 {
+    LONGLONG now, idleMs, remain, idlePauseMs;
+    int paused;
+    static int loggedIdle = 0;
+
     if (g_locked) return;
 
-    LONGLONG now = (LONGLONG)GetTickCount64();
-    int idle = (g_cfg.idle_pause &&
-                (now - g_lastInputTick) > (LONGLONG)g_cfg.idle_seconds * 1000);
+    now = (LONGLONG)GetTickCount64();
 
-    if (!idle)
+    /* ② 有视频/媒体在播 -> 算作活动，刷新空闲计时器 */
+    if (g_cfg.video_detect && MediaVideoActive()) {
+        InterlockedExchange64(&g_lastInputTick, now);
+    }
+
+    /* ① 观影模式：全屏视频播放中，既不计时也不锁屏 */
+    if (g_cfg.video_detect && MediaFullscreenVideo()) {
+        if (InterlockedCompareExchange(&g_cinemaMode, 0, 0) == 0) {
+            InterlockedExchange(&g_cinemaMode, 1);
+            loggedIdle = 0;
+            LogEventW(L"进入观影模式（全屏视频播放中）：暂停计时、不锁屏；剩余 %lld 分钟｜%s",
+                      (g_sessionLenMs - g_usageMs) / 60000,
+                      MediaLastDetail() ? MediaLastDetail() : L"");
+        }
+        return;                    /* 不推进 usage，也不做锁屏判断 */
+    }
+    if (InterlockedCompareExchange(&g_cinemaMode, 0, 0) != 0) {
+        InterlockedExchange(&g_cinemaMode, 0);
+        InterlockedExchange64(&g_lastInputTick, now);   /* 刚看完，别立刻判闲置 */
+        LogEventW(L"退出观影模式，恢复计时；剩余 %lld 分钟", (g_sessionLenMs - g_usageMs) / 60000);
+    }
+
+    /* ③ 空闲判定 */
+    idleMs = now - g_lastInputTick;
+    idlePauseMs = (LONGLONG)g_cfg.idle_seconds * 1000;
+    paused = (g_cfg.idle_pause && idlePauseMs > 0 && idleMs >= idlePauseMs);
+
+    if (paused) {
+        if (!loggedIdle) {
+            loggedIdle = 1;
+            if (g_cfg.idle_seconds < 120) {
+                LogEventW(L"空闲超过 %d 秒，暂停计时（剩余 %lld 分钟）",
+                          g_cfg.idle_seconds, (g_sessionLenMs - g_usageMs) / 60000);
+            } else {
+                LogEventW(L"空闲超过 %d 分钟，暂停计时（剩余 %lld 分钟）",
+                          g_cfg.idle_seconds / 60, (g_sessionLenMs - g_usageMs) / 60000);
+            }
+        }
+    } else if (loggedIdle) {
+        loggedIdle = 0;
+        if (g_cfg.idle_reset) {
+            InterlockedExchange(&g_warned, 0);
+            SessionReset((LONGLONG)g_cfg.session_minutes * 60000, L"长时间空闲后重新开始计时");
+        } else {
+            LogEventW(L"空闲结束，继续计时（剩余 %lld 分钟）", (g_sessionLenMs - g_usageMs) / 60000);
+        }
+    }
+
+    /* ④ 正常推进（暂停时不推进） */
+    if (!paused)
         InterlockedAdd64(&g_usageMs, 1000);
 
-    LONGLONG remain = g_sessionLenMs - g_usageMs;
+    remain = g_sessionLenMs - g_usageMs;
     if (remain <= 0) {
         LockBegin((LONGLONG)g_cfg.break_minutes * 60000, L"已达到本次限时使用时长");
         return;
@@ -379,6 +441,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nS
     SetInitStage(L"安装键盘/鼠标钩子");
     HooksInstall();
 
+    /* 视频检测（不截图）：WASAPI 音频会话 + GPU 视频解码计数器 + 全屏判定，独立线程每秒一次 */
+    if (g_cfg.video_detect) {
+        SetInitStage(L"启动视频检测线程");
+        MediaStart();
+        LogEventW(L"视频检测已启用：全屏视频播放时暂停计时且不锁屏；窗口化视频按正常逻辑计时");
+    } else {
+        LogEventW(L"视频检测已关闭（video_detect=0）");
+    }
+    if (g_cfg.idle_pause) {
+        if (g_cfg.idle_seconds < 120) {
+            LogEventW(L"空闲策略：闲置满 %d 秒暂停计时；%s",
+                      g_cfg.idle_seconds,
+                      g_cfg.idle_reset ? L"之后回来重新开始计时" : L"之后回来接着原进度计时");
+        } else {
+            LogEventW(L"空闲策略：闲置满 %d 分钟暂停计时；%s",
+                      g_cfg.idle_seconds / 60,
+                      g_cfg.idle_reset ? L"之后回来重新开始计时" : L"之后回来接着原进度计时");
+        }
+    } else {
+        LogEventW(L"空闲策略：关闭（idle_pause=0，一直计时）");
+    }
+
     LONGLONG len = (LONGLONG)g_cfg.session_minutes * 60000;
     SessionReset(len, L"程序启动");
 
@@ -414,6 +498,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nS
     }
 
     UiShutdown();
+    MediaStop();
     HooksUninstall();
     LogEventW(L"ScreenTime 退出");
     LogClose();

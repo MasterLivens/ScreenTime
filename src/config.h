@@ -18,7 +18,9 @@ typedef struct {
     WCHAR api_key[128];
     int   vision_enabled;         /* 1=调用模型识别 */
     int   idle_pause;             /* 1=无人操作时暂停计时 */
-    int   idle_seconds;           /* 无输入多少秒后视为离开 */
+    int   idle_seconds;           /* 无输入多少秒后视为离开（默认 600 = 10 分钟） */
+    int   idle_reset;             /* 1=长时间空闲后回来"重新开始计时"；0=接着之前的进度 */
+    int   video_detect;           /* 1=用系统状态检测视频（全屏观影时暂停计时且不锁屏） */
     int   penalty;                /* 1=密码提前解锁会缩短下一次使用时长 */
     int   warn_minutes;           /* 锁屏前多少分钟开始提醒 */
     int   save_screenshots;       /* 1=本地留存截图 */

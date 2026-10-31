@@ -22,6 +22,7 @@ extern volatile LONGLONG g_lockEndTick;
 extern volatile LONG g_locked;
 extern volatile LONG g_wrongCount;
 extern volatile LONG g_warned;
+extern volatile LONG g_cinemaMode;            /* 1 = 观影模式（全屏视频播放中）：暂停计时且不锁屏 */
 extern volatile LONGLONG g_pendingPenaltyMs;  /* 下次会话要扣减的毫秒 */
 
 extern volatile LONGLONG g_lastShotTick;
@@ -32,7 +33,7 @@ extern HINSTANCE g_hInst;
 
 /* 版本号（与根目录 VERSION 保持一致） */
 #ifndef ST_VERSION
-#define ST_VERSION L"1.1.4"
+#define ST_VERSION L"1.1.5"
 #endif
 
 /* 初始化进度：每进入一个可能失败的步骤调用一次。
