@@ -19,10 +19,10 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.1.6"
+  #define AppVersion "1.1.7"
 #endif
 #ifndef AppVersion4
-  #define AppVersion4 "1.1.6.0"
+  #define AppVersion4 "1.1.7.0"
 #endif
 #ifndef PayloadDir
   #define PayloadDir "D:\Work\ScreenTime"

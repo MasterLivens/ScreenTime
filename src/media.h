@@ -29,10 +29,16 @@ void MediaStop(void);
 void MediaSetMode(int mode);
 int  MediaMode(void);
 
-/* 1 = 有视频/媒体在播；0 = 没有。每秒刷新。 */
+/* 1 = 有视频/媒体在播（音频或硬解）；0 = 没有。每秒刷新。 */
 int MediaVideoActive(void);
 
-/* 1 = 全屏且正在播（观影模式）；0 = 否。连续约 2 秒满足才置 1，退出有约 3 秒迟滞。 */
+/* 1 = 前景窗口铺满显示器（全屏）。每秒刷新，无迟滞。 */
+int MediaFullscreen(void);
+
+/* 1 = 有"视频信号"（有声在播 或 有硬解占用）。模式 2 下不参与判定。 */
+int MediaVideoSignals(void);
+
+/* 便利值 = MediaFullscreen() && MediaVideoSignals()（探针/日志用）。 */
 int MediaFullscreenVideo(void);
 
 /* 最近一次采集的摘要（写日志用），例如 "音频=1 硬解=0 全屏=1"。 */

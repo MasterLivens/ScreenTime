@@ -65,14 +65,18 @@ struct ST_IAudioMeterInformationVtbl {
 
 /* ---------------- 对外的状态 ---------------- */
 
-static volatile LONG g_videoActive = 0;
-static volatile LONG g_fullscreenVideo = 0;
+static volatile LONG g_videoActive = 0;   /* 音频或硬解，或模式2下的全屏 */
+static volatile LONG g_fullscreen = 0;    /* 前景窗口全屏 */
+static volatile LONG g_signals = 0;       /* 音频或硬解（真实信号） */
+static volatile LONG g_fullscreenVideo = 0; /* = fullscreen && signals，仅作展示 */
 static volatile LONG g_mode = 1;      /* 1=音频/硬解+全屏  2=只看全屏 */
 static WCHAR g_detail[192] = L"(未采集)";
 static CRITICAL_SECTION g_detailCs;
 static int g_detailCsReady = 0;
 
 int MediaVideoActive(void) { return (int)InterlockedCompareExchange(&g_videoActive, 0, 0); }
+int MediaFullscreen(void) { return (int)InterlockedCompareExchange(&g_fullscreen, 0, 0); }
+int MediaVideoSignals(void) { return (int)InterlockedCompareExchange(&g_signals, 0, 0); }
 int MediaFullscreenVideo(void) { return (int)InterlockedCompareExchange(&g_fullscreenVideo, 0, 0); }
 
 void MediaSetMode(int mode) { InterlockedExchange(&g_mode, (LONG)mode); }
@@ -268,8 +272,6 @@ static int ForegroundIsFullscreen(void)
 
 static HANDLE g_thread = NULL;
 static volatile LONG g_stop = 0;
-static int g_fsHit = 0;      /* 连续命中次数 */
-static int g_fsMiss = 0;     /* 连续未命中次数 */
 static int g_force = 0;      /* 调试用：0=不干预 1=假全屏视频 2=假窗口化视频 3=强制关闭 */
 static WCHAR g_forceFile[MAX_PATH] = L"";  /* 调试用：运行中可以改的文件开关 */
 
@@ -365,22 +367,19 @@ static unsigned int __stdcall MediaThread(void *arg)
             else if (force == 3) { video = 0; fullscreen = 0; }
         }
 
+        /* 对外只暴露原始事实：全屏与否、有没有视频信号（音频/硬解）。
+           是否进入"观影模式"由主线程结合"最近有没有键鼠输入"来判断
+           —— 游戏一直在按键，永远不满足安静条件，所以不会被当成观影。 */
+        InterlockedExchange(&g_signals,
+                            (MediaMode() == 2) ? (fullscreen ? 1 : 0) : ((audio || gpu) ? 1 : 0));
+        InterlockedExchange(&g_fullscreen, fullscreen ? 1 : 0);
         InterlockedExchange(&g_videoActive, video);
+        InterlockedExchange(&g_fullscreenVideo,
+                            (fullscreen && (MediaMode() == 2 ? 1 : (audio || gpu))) ? 1 : 0);
 
-        /* 迟滞：进 2 次，出 3 次 */
-        if (video && fullscreen) {
-            g_fsHit++;
-            g_fsMiss = 0;
-            if (g_fsHit >= 2) InterlockedExchange(&g_fullscreenVideo, 1);
-        } else {
-            g_fsMiss++;
-            g_fsHit = 0;
-            if (g_fsMiss >= 3) InterlockedExchange(&g_fullscreenVideo, 0);
-        }
-
-        StringCchPrintfW(dAll, 192, L"%s, %s, 全屏:%d, 观影:%d, 模式:%d%s",
+        StringCchPrintfW(dAll, 192, L"%s, %s, 全屏:%d, 信号:%d, 模式:%d%s",
                          dAudio, dGpu, fullscreen ? 1 : 0,
-                         MediaFullscreenVideo() ? 1 : 0,
+                         MediaVideoSignals(),
                          MediaMode(),
                          (g_force || ForceFromFile()) ? L"（调试强制）" : L"");
         SetDetail(dAll);

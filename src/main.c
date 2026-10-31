@@ -139,26 +139,37 @@ void SessionTick(void)
 
     now = (LONGLONG)GetTickCount64();
 
-    /* ② 有视频/媒体在播 -> 算作活动，刷新空闲计时器 */
-    if (g_cfg.video_detect != 0 && MediaVideoActive()) {
+    /* ② 窗口化的视频在播 -> 算作活动，刷新空闲计时器。
+         全屏时不刷新：否则"最近没人操作"这个条件永远达不到，观影模式就进不去了。 */
+    if (g_cfg.video_detect != 0 && !MediaFullscreen() && MediaVideoActive()) {
         InterlockedExchange64(&g_lastInputTick, now);
     }
 
-    /* ① 观影模式：全屏视频播放中，既不计时也不锁屏 */
-    if (g_cfg.video_detect != 0 && MediaFullscreenVideo()) {
-        if (InterlockedCompareExchange(&g_cinemaMode, 0, 0) == 0) {
-            InterlockedExchange(&g_cinemaMode, 1);
-            loggedIdle = 0;
-            LogEventW(L"进入观影模式（全屏视频播放中）：暂停计时、不锁屏；剩余 %lld 分钟｜%s",
-                      (g_sessionLenMs - g_usageMs) / 60000,
-                      MediaLastDetail() ? MediaLastDetail() : L"");
+    /* ① 观影模式 = 全屏 + 有视频信号（模式2 只看全屏）+ 最近 N 秒没有键鼠输入。
+         游戏一直在按键/动鼠标，永远不满足"安静"条件，所以不会被当成观影；
+         真正看片时人是静止的。 */
+    {
+        int fs = (g_cfg.video_detect != 0) ? MediaFullscreen() : 0;
+        int sig = (g_cfg.video_detect == 2) ? 1 : MediaVideoSignals();
+        LONGLONG quietNeed = (LONGLONG)g_cfg.video_quiet_seconds * 1000;
+        int want = (fs && sig && (now - g_lastInputTick) >= quietNeed);
+
+        if (want) {
+            if (InterlockedCompareExchange(&g_cinemaMode, 0, 0) == 0) {
+                InterlockedExchange(&g_cinemaMode, 1);
+                loggedIdle = 0;
+                LogEventW(L"进入观影模式（全屏 + 已 %d 秒无操作）：暂停计时、不锁屏；剩余 %lld 分钟｜%s",
+                          g_cfg.video_quiet_seconds,
+                          (g_sessionLenMs - g_usageMs) / 60000,
+                          MediaLastDetail() ? MediaLastDetail() : L"");
+            }
+            return;                /* 不推进 usage，也不做锁屏判断 */
         }
-        return;                    /* 不推进 usage，也不做锁屏判断 */
-    }
-    if (InterlockedCompareExchange(&g_cinemaMode, 0, 0) != 0) {
-        InterlockedExchange(&g_cinemaMode, 0);
-        InterlockedExchange64(&g_lastInputTick, now);   /* 刚看完，别立刻判闲置 */
-        LogEventW(L"退出观影模式，恢复计时；剩余 %lld 分钟", (g_sessionLenMs - g_usageMs) / 60000);
+        if (InterlockedCompareExchange(&g_cinemaMode, 0, 0) != 0) {
+            InterlockedExchange(&g_cinemaMode, 0);
+            InterlockedExchange64(&g_lastInputTick, now);   /* 刚看完/刚动鼠标，别立刻判闲置 */
+            LogEventW(L"退出观影模式，恢复计时；剩余 %lld 分钟", (g_sessionLenMs - g_usageMs) / 60000);
+        }
     }
 
     /* ③ 空闲判定 */
@@ -447,11 +458,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nS
         MediaSetMode(g_cfg.video_detect);
         MediaStart();
         if (g_cfg.video_detect == 2) {
-            LogEventW(L"视频检测已启用（模式 2：只看全屏）：前景窗口全屏时暂停计时且不锁屏"
-                      L"（不依赖音频/GPU，适合没有显卡或声卡的虚拟机）");
+            LogEventW(L"视频检测已启用（模式 2：只看全屏）：全屏且已 %d 秒无操作 -> 暂停计时且不锁屏"
+                      L"（不依赖音频/GPU，适合没有显卡或声卡的虚拟机；游戏有输入不会被误判）",
+                      g_cfg.video_quiet_seconds);
         } else {
-            LogEventW(L"视频检测已启用（模式 1：音频/硬解 + 全屏）：全屏视频播放时暂停计时且不锁屏；"
-                      L"窗口化视频按正常逻辑计时");
+            LogEventW(L"视频检测已启用（模式 1：音频/硬解 + 全屏 + 已 %d 秒无操作）：暂停计时且不锁屏；"
+                      L"窗口化视频按正常逻辑计时；全屏游戏有输入不会被误判",
+                      g_cfg.video_quiet_seconds);
         }
     } else {
         LogEventW(L"视频检测已关闭（video_detect=0）");

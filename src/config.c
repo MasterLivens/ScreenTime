@@ -29,6 +29,7 @@ void ConfigDefaults(Config *c)
     c->idle_seconds          = 600;   /* 10 分钟：闲置超过它才算"人不在" */
     c->idle_reset            = 1;     /* 回来时重新开始计时 */
     c->video_detect          = 1;     /* 全屏观影时暂停计时且不锁屏 */
+    c->video_quiet_seconds   = 30;    /* 全屏后 30 秒没有键鼠操作才认为是"在看视频"（游戏会被排除） */
     c->penalty               = 1;
     c->warn_minutes          = 5;
     c->save_screenshots      = 1;
@@ -64,6 +65,7 @@ static void SetKey(Config *c, const WCHAR *k, const WCHAR *v)
     else if (!_wcsicmp(k, L"idle_seconds"))     c->idle_seconds = AtoiDef(v, c->idle_seconds);
     else if (!_wcsicmp(k, L"idle_reset"))       c->idle_reset = AtoiDef(v, c->idle_reset);
     else if (!_wcsicmp(k, L"video_detect"))     c->video_detect = AtoiDef(v, c->video_detect);
+    else if (!_wcsicmp(k, L"video_quiet_seconds")) c->video_quiet_seconds = AtoiDef(v, c->video_quiet_seconds);
     else if (!_wcsicmp(k, L"penalty"))          c->penalty = AtoiDef(v, c->penalty);
     else if (!_wcsicmp(k, L"warn_minutes"))     c->warn_minutes = AtoiDef(v, c->warn_minutes);
     else if (!_wcsicmp(k, L"save_screenshots")) c->save_screenshots = AtoiDef(v, c->save_screenshots);
@@ -111,6 +113,8 @@ static void ClampConfig(Config *c)
     /* video_detect: 0=关 1=音频/硬解+全屏 2=只看全屏 */
     if (c->video_detect < 0)          c->video_detect = 0;
     if (c->video_detect > 2)          c->video_detect = 2;
+    if (c->video_quiet_seconds < 5)   c->video_quiet_seconds = 5;
+    if (c->video_quiet_seconds > 3600) c->video_quiet_seconds = 3600;
     if (c->warn_minutes < 0)         c->warn_minutes = 0;
     if (c->warn_minutes > 120)       c->warn_minutes = 120;
     if (c->max_image_width < 320)    c->max_image_width = 320;
@@ -244,6 +248,7 @@ static int BuildIniText(const Config *c, char *out, size_t cap)
         "idle_seconds = %d\n"
         "idle_reset = %d\n"
         "video_detect = %d\n"
+        "video_quiet_seconds = %d\n"
         "penalty = %d\n"
         "\n"
         "; ---- 截图 ----\n"
@@ -268,7 +273,8 @@ static int BuildIniText(const Config *c, char *out, size_t cap)
         "password_hash = %s\n"
         "password_salt = %s\n",
         c->session_minutes, c->break_minutes, c->warn_minutes,
-        c->idle_pause, c->idle_seconds, c->idle_reset, c->video_detect, c->penalty,
+        c->idle_pause, c->idle_seconds, c->idle_reset, c->video_detect,
+        c->video_quiet_seconds, c->penalty,
         c->screenshot_enabled, c->screenshot_interval, c->save_screenshots,
         c->vision_enabled, c->keep_days, c->max_image_width,
         url, model, key,
