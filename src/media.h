@@ -20,6 +20,15 @@
 void MediaStart(void);
 void MediaStop(void);
 
+/* 检测模式（对应配置 video_detect）：
+ *   0 = 关闭（不启动采集线程）
+ *   1 = 自动：音频/硬解 + 全屏（默认；有 GPU、有声卡时最准）
+ *   2 = 只看全屏：只要前景窗口铺满屏幕就算"在播"，完全不依赖音频与 GPU
+ *       —— 给没有显卡/声卡的虚拟机用，判据最稳，代价是全屏游戏/PPT 也会被当成观影
+ */
+void MediaSetMode(int mode);
+int  MediaMode(void);
+
 /* 1 = 有视频/媒体在播；0 = 没有。每秒刷新。 */
 int MediaVideoActive(void);
 

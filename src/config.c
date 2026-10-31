@@ -108,7 +108,9 @@ static void ClampConfig(Config *c)
     if (c->idle_seconds < 10)        c->idle_seconds = 10;
     if (c->idle_seconds > 7200)      c->idle_seconds = 7200;
     if (c->idle_reset)               c->idle_reset = 1; else c->idle_reset = 0;
-    if (c->video_detect)             c->video_detect = 1; else c->video_detect = 0;
+    /* video_detect: 0=关 1=音频/硬解+全屏 2=只看全屏 */
+    if (c->video_detect < 0)          c->video_detect = 0;
+    if (c->video_detect > 2)          c->video_detect = 2;
     if (c->warn_minutes < 0)         c->warn_minutes = 0;
     if (c->warn_minutes > 120)       c->warn_minutes = 120;
     if (c->max_image_width < 320)    c->max_image_width = 320;

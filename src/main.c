@@ -140,12 +140,12 @@ void SessionTick(void)
     now = (LONGLONG)GetTickCount64();
 
     /* ② 有视频/媒体在播 -> 算作活动，刷新空闲计时器 */
-    if (g_cfg.video_detect && MediaVideoActive()) {
+    if (g_cfg.video_detect != 0 && MediaVideoActive()) {
         InterlockedExchange64(&g_lastInputTick, now);
     }
 
     /* ① 观影模式：全屏视频播放中，既不计时也不锁屏 */
-    if (g_cfg.video_detect && MediaFullscreenVideo()) {
+    if (g_cfg.video_detect != 0 && MediaFullscreenVideo()) {
         if (InterlockedCompareExchange(&g_cinemaMode, 0, 0) == 0) {
             InterlockedExchange(&g_cinemaMode, 1);
             loggedIdle = 0;
@@ -442,10 +442,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nS
     HooksInstall();
 
     /* 视频检测（不截图）：WASAPI 音频会话 + GPU 视频解码计数器 + 全屏判定，独立线程每秒一次 */
-    if (g_cfg.video_detect) {
+    if (g_cfg.video_detect != 0) {
         SetInitStage(L"启动视频检测线程");
+        MediaSetMode(g_cfg.video_detect);
         MediaStart();
-        LogEventW(L"视频检测已启用：全屏视频播放时暂停计时且不锁屏；窗口化视频按正常逻辑计时");
+        if (g_cfg.video_detect == 2) {
+            LogEventW(L"视频检测已启用（模式 2：只看全屏）：前景窗口全屏时暂停计时且不锁屏"
+                      L"（不依赖音频/GPU，适合没有显卡或声卡的虚拟机）");
+        } else {
+            LogEventW(L"视频检测已启用（模式 1：音频/硬解 + 全屏）：全屏视频播放时暂停计时且不锁屏；"
+                      L"窗口化视频按正常逻辑计时");
+        }
     } else {
         LogEventW(L"视频检测已关闭（video_detect=0）");
     }

@@ -67,12 +67,16 @@ struct ST_IAudioMeterInformationVtbl {
 
 static volatile LONG g_videoActive = 0;
 static volatile LONG g_fullscreenVideo = 0;
+static volatile LONG g_mode = 1;      /* 1=音频/硬解+全屏  2=只看全屏 */
 static WCHAR g_detail[192] = L"(未采集)";
 static CRITICAL_SECTION g_detailCs;
 static int g_detailCsReady = 0;
 
 int MediaVideoActive(void) { return (int)InterlockedCompareExchange(&g_videoActive, 0, 0); }
 int MediaFullscreenVideo(void) { return (int)InterlockedCompareExchange(&g_fullscreenVideo, 0, 0); }
+
+void MediaSetMode(int mode) { InterlockedExchange(&g_mode, (LONG)mode); }
+int  MediaMode(void) { return (int)InterlockedCompareExchange(&g_mode, 0, 0); }
 
 const WCHAR *MediaLastDetail(void) { return g_detail; }
 
@@ -349,6 +353,10 @@ static unsigned int __stdcall MediaThread(void *arg)
 
         video = (audio || gpu) ? 1 : 0;
 
+        /* 模式 2：只看全屏，完全不依赖音频与 GPU（给没有显卡/声卡的虚拟机用）。
+           全屏时把 video 也置 1，这样"算作有活动"的逻辑一致，主线程再判观影。 */
+        if (MediaMode() == 2) video = fullscreen ? 1 : 0;
+
         {
             int force = ForceFromFile();
             if (force == 0) force = g_force;
@@ -370,10 +378,11 @@ static unsigned int __stdcall MediaThread(void *arg)
             if (g_fsMiss >= 3) InterlockedExchange(&g_fullscreenVideo, 0);
         }
 
-        StringCchPrintfW(dAll, 192, L"%s, %s, 全屏:%d, 观影:%d%s",
+        StringCchPrintfW(dAll, 192, L"%s, %s, 全屏:%d, 观影:%d, 模式:%d%s",
                          dAudio, dGpu, fullscreen ? 1 : 0,
                          MediaFullscreenVideo() ? 1 : 0,
-                         g_force ? L"（调试强制）" : L"");
+                         MediaMode(),
+                         (g_force || ForceFromFile()) ? L"（调试强制）" : L"");
         SetDetail(dAll);
 
         for (int i = 0; i < 20 && !g_stop; i++) Sleep(50);   /* ~1 秒 */

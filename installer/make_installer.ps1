@@ -73,7 +73,7 @@ if ($AutoBundle) {
     . (Join-Path $ProjectRoot 'awtk_env.ps1')
 }
 
-$DefaultVersion = '1.1.5'
+$DefaultVersion = '1.1.6'
 $ScaleDirs      = @('x1', 'x2', 'x3', 'x4')
 
 # ---------------------------------------------------------------------------
@@ -247,6 +247,26 @@ if ($AutoBundle) {
     $StagingDir = Join-Path $DistDir '_bundle'
     New-BundleStaging -LauncherExe $Launcher -GlExe $GlExe -GlAwtk $GlBuildDir `
                       -SoftExe $SoftExe -SoftAwtk $SoftBuildDir -OutDir $StagingDir
+
+    # mediaprobe.exe: on-site diagnostic tool for the video detection signals
+    $ProbeExe = Join-Path $ProjectRoot 'out\mediaprobe.exe'
+    $GccExe   = 'D:\w64devkit\bin\gcc.exe'
+    if (-not (Test-Path -LiteralPath $ProbeExe -PathType Leaf)) {
+        if (Test-Path -LiteralPath $GccExe -PathType Leaf) {
+            Write-Host '    building mediaprobe.exe ...' -ForegroundColor DarkGray
+            & $GccExe -O2 -std=gnu11 -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0601 `
+                      "-I$(Join-Path $ProjectRoot 'src')" `
+                      (Join-Path $ProjectRoot 'tools\mediaprobe.c') `
+                      (Join-Path $ProjectRoot 'src\media.c') -o $ProbeExe `
+                      -lole32 -luuid -lpdh -lshell32 -luser32 -lgdi32
+        }
+    }
+    if (Test-Path -LiteralPath $ProbeExe -PathType Leaf) {
+        Copy-Item -LiteralPath $ProbeExe -Destination $StagingDir -Force
+    } else {
+        Write-Host '    WARN: mediaprobe.exe not available, skipping' -ForegroundColor Yellow
+    }
+
     Write-Ok ("staged bundle: {0} ({1} files)" -f $StagingDir, (Get-ChildItem $StagingDir -Recurse -File | Measure-Object).Count)
 
     $PayloadDir = $StagingDir
