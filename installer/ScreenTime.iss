@@ -5,7 +5,7 @@
 ;    "C:\Program Files\Inno Setup 7\ISCC.exe" ^
 ;        /DAppVersion=1.1.1 /DAppVersion4=1.1.1.0 ^
 ;        /DPayloadDir=D:\Work\ScreenTime ^
-;        /DAwtkDir=D:\Work\AWTK\awtk-master ^
+;        /DAwtkDir=D:\Work\ScreenTime\third_party\awtk ^
 ;        /O..\dist installer\ScreenTime.iss
 ;
 ;  特点（与之前 NSIS 版对齐）：
@@ -19,21 +19,21 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.1.8"
+  #define AppVersion "1.1.9"
 #endif
 #ifndef AppVersion4
-  #define AppVersion4 "1.1.8.0"
+  #define AppVersion4 "1.1.9.0"
 #endif
 #ifndef PayloadDir
   #define PayloadDir "D:\Work\ScreenTime"
 #endif
 #ifndef AwtkDir
-  #define AwtkDir "D:\Work\AWTK\awtk-master"
+  #define AwtkDir "D:\Work\ScreenTime\third_party\awtk"
 #endif
-; AWTK 的构建目录：GL 版是 build_mingw，软件渲染版（无 OpenGL 的机器用）在仓库的 out\awtk_soft。
+; AWTK 的构建目录：GL 版 out\awtk_gl，软件渲染版（无 OpenGL 的机器用）out\awtk_soft。
 ; 由 make_installer.ps1 通过 /DAwtkBuild=... 传进来；这里给个默认值保证手工调 ISCC 也能编译。
 #ifndef AwtkBuild
-  #define AwtkBuild AwtkDir + "\build_mingw"
+  #define AwtkBuild "D:\Work\ScreenTime\out\awtk_gl"
 #endif
 ; 合体包（/DBundle=1 + /DBundleDir=<staging>）：一个包里同时放 gl\ 和 soft\ 两套后端 +
 ; 启动器，安装后由启动器在运行时探测 OpenGL 选择后端。

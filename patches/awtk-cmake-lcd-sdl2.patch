@@ -1,0 +1,22 @@
+Fix AWTK's CMake port: it never compiles src/lcd/lcd_sdl2.c, so the
+AWTK_NANOVG_BACKEND=AGGE (software renderer) build fails at link time with
+undefined references to lcd_sdl2_init / lcd_sdl2_texture_reset.
+
+AWTK's own SCons build (src/SConscript) does compile that file, so this is a
+plain gap in the CMake port. The file is only compiled by us for the SDL
+software-rendering path, but adding it unconditionally is harmless for the
+OpenGL build too (SDL2 is always a dependency of this build).
+
+Applied by build_awtk.ps1 (idempotent); revert with:
+  git -C third_party/awtk checkout -- cmake/src_libs.cmake
+
+--- a/cmake/src_libs.cmake
++++ b/cmake/src_libs.cmake
+@@ -53,6 +53,7 @@
+ # --- base (src/SConscript) ---
+ set(_base_src
+   "${CMAKE_SOURCE_DIR}/src/lcd/lcd_mono.c"
++  "${CMAKE_SOURCE_DIR}/src/lcd/lcd_sdl2.c"
+   "${CMAKE_SOURCE_DIR}/src/main_loop/main_loop_simple.c"
+   "${CMAKE_SOURCE_DIR}/src/main_loop/main_loop_console.c"
+   "${CMAKE_SOURCE_DIR}/src/lcd/lcd_nanovg.c"

@@ -1,10 +1,10 @@
 # ScreenTime build script -- AWTK UI build (MinGW-w64 / w64devkit)
-# AWTK is referenced in place at D:\Work\AWTK\awtk-master; nothing is copied into this workspace.
+# AWTK is the git submodule third_party\awtk; both backends are built into out\ by build_awtk.ps1.
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1 -Out <path\to\ScreenTime.exe>
 #   powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1 -Backend soft -Out out\soft\ScreenTime.exe
-#       (soft = AWTK software renderer, runs on machines WITHOUT OpenGL; needs build_awtk_soft.ps1)
+#       (soft = AWTK software renderer, runs on machines WITHOUT OpenGL; needs build_awtk.ps1 -Backend soft)
 param(
     [string[]]$Extra = @(),
     [string]$Out = '',
@@ -35,11 +35,19 @@ if (-not $Out) { $Out = Join-Path $root 'ScreenTime.exe' }
 $outDir = Split-Path -Parent $Out
 if ($outDir -and -not (Test-Path $outDir)) { New-Item -ItemType Directory -Force -Path $outDir | Out-Null }
 
+# Dev-only fallback for the AWTK resource root: this checkout's own submodule,
+# so the built exe falls back to third_party\awtk\res when res\ is not next to it.
+# NOTE: the \" escapes are required -- PowerShell would otherwise strip the quotes
+# and gcc would see -DAWTK_RES_ROOT=D:/... (a bare token, not a C string).
+$resRoot = (Join-Path $root 'third_party\awtk\res') -replace '\\', '/'
+$resDefine = '-DAWTK_RES_ROOT=\"' + $resRoot + '\"'
+
 $flags = @(
     '-O2', '-std=gnu11', '-Wall', '-Wextra',
     '-finput-charset=UTF-8', '-fexec-charset=UTF-8',
     '-DUNICODE', '-D_UNICODE',
     '-D_WIN32_WINNT=0x0601', '-D_WIN32_IE=0x0600',
+    $resDefine,
     '-mwindows', '-static'
 ) + (Get-AwtkCFlags) + $Extra + $sources + @('-o', $out) + (Get-AwtkLinkFlags) + @(
     '-lgdiplus', '-lwinhttp', '-lgdi32', '-luser32',

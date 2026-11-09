@@ -1,9 +1,10 @@
-# AWTK in-place reference config (NO AWTK file is copied into this workspace).
+# AWTK reference config. AWTK lives in the git submodule third_party\awtk and is
+# compiled into THIS repo (out\awtk_gl, out\awtk_soft) -- nothing outside the repo.
 #
-# Two AWTK builds are supported and picked automatically:
-#   out\awtk_soft            software renderer (nanovg AGGE) -- works WITHOUT OpenGL
-#                            (build it with .\build_awtk_soft.ps1)
-#   <AwtkRoot>\build_mingw   GPU/OpenGL build (original setup)
+# Two AWTK builds are supported and picked by $env:AWTK_BACKEND:
+#   out\awtk_gl    GPU/OpenGL build            (.\build_awtk.ps1 -Backend gl)
+#   out\awtk_soft  software renderer (AGGE)    (.\build_awtk.ps1 -Backend soft)
+#                  works WITHOUT OpenGL.
 #
 # Include dirs and defines are parsed out of the chosen build's build.ninja, so the
 # flags always match that awtk.dll (same ABI) -- no hand-maintained macro list.
@@ -14,10 +15,10 @@
 #
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 
-$AwtkRoot  = 'D:\Work\AWTK\awtk-master'
+$AwtkRoot  = Join-Path $PSScriptRoot 'third_party\awtk'
 $AwtkRes   = Join-Path $AwtkRoot 'res'
 $SoftBuild = Join-Path $PSScriptRoot 'out\awtk_soft'
-$GlBuild   = Join-Path $AwtkRoot 'build_mingw'
+$GlBuild   = Join-Path $PSScriptRoot 'out\awtk_gl'
 
 # Backend selection: 'gl' (default, GPU/OpenGL) or 'soft' (software renderer).
 # build.ps1 / make_installer.ps1 set $env:AWTK_BACKEND before dot-sourcing this file.
@@ -26,10 +27,13 @@ if ($env:AWTK_BACKEND) { $Backend = $env:AWTK_BACKEND.ToLower() }
 
 if ($Backend -eq 'soft') {
     if (-not (Test-Path -LiteralPath (Join-Path $SoftBuild 'awtk.dll') -PathType Leaf)) {
-        throw ("software AWTK build not found ({0}). Run .\build_awtk_soft.ps1 first." -f $SoftBuild)
+        throw ("software AWTK build not found ({0}). Run .\build_awtk.ps1 -Backend soft first." -f $SoftBuild)
     }
     $AwtkBuild = $SoftBuild
 } else {
+    if (-not (Test-Path -LiteralPath (Join-Path $GlBuild 'awtk.dll') -PathType Leaf)) {
+        throw ("OpenGL AWTK build not found ({0}). Run .\build_awtk.ps1 -Backend gl first." -f $GlBuild)
+    }
     $AwtkBuild = $GlBuild
 }
 $AwtkBackend = $Backend
@@ -109,7 +113,7 @@ if ($parsedOk) {
     )
     $AwtkFlagsSrc = 'hardcoded GL list'
 } else {
-    throw ("cannot parse AWTK defines from {0}\build.ninja (software build). Run build_awtk_soft.ps1 first, or delete out\awtk_soft to fall back to the GL build." -f $AwtkBuild)
+    throw ("cannot parse AWTK defines from {0}\build.ninja. Run .\build_awtk.ps1 -Backend soft first, or use -Backend gl." -f $AwtkBuild)
 }
 
 function Get-AwtkCFlags {

@@ -27,7 +27,7 @@
 #include "util.h"
 
 #ifndef AWTK_RES_ROOT
-#define AWTK_RES_ROOT "D:/Work/AWTK/awtk-master/res"
+#define AWTK_RES_ROOT "D:/Work/ScreenTime/third_party/awtk/res"
 #endif
 
 #define WM_TRAY        (WM_APP + 1)

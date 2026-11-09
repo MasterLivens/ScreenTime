@@ -39,6 +39,14 @@
 /test/*.png
 /test/**/b/
 
+# 截图标注素材（工作过程中产生的临时图片）
+/annot/
+
+# AWTK 子模块里的构建产物（我们只在 out\ 里构建，这里兜底）
+/third_party/awtk/build*/
+/third_party/awtk/bin/
+/third_party/awtk/lib/
+
 # ---------- 编辑器 / 系统杂项 ----------
 .vscode/
 .idea/

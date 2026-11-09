@@ -33,7 +33,7 @@ extern HINSTANCE g_hInst;
 
 /* 版本号（与根目录 VERSION 保持一致） */
 #ifndef ST_VERSION
-#define ST_VERSION L"1.1.5"
+#define ST_VERSION L"1.1.9"
 #endif
 
 /* 初始化进度：每进入一个可能失败的步骤调用一次。

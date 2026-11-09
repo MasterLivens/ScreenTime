@@ -11,6 +11,10 @@
 *.zip   binary
 *.bin   binary
 
+# 补丁文件要按 CRLF 检出：AWTK 子模块里的文件是 CRLF，补丁的上下文行也必须 CRLF
+# 才能被 git apply 干净匹配（build_awtk.ps1 另外还加了 --ignore-whitespace 兜底）
+patches/*.patch  text eol=crlf
+
 # NSIS 脚本与 C 源码按 LF 处理
 *.nsi   text eol=lf
 *.c     text eol=lf

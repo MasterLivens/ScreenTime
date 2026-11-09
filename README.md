@@ -4,7 +4,7 @@
 每分钟截一次屏，交给本地视觉模型识别“当前在干什么”，结果写入日志。
 默认**启动后不出现任何窗口**（只在后台计时/锁屏），适合给小朋友用。
 
-界面用 **AWTK** 画（`D:\Work\AWTK\awtk-master` 就地引用，**不往本工作区拷贝任何 AWTK 文件**）；
+界面用 **AWTK** 画（git 子模块 `third_party\awtk`，版本锁在仓库里，`git submodule update --init --recursive` 拉取）；
 锁屏用的全屏/置顶/剪裁鼠标、托盘图标、低级键鼠钩子仍然是纯 Win32。
 
 ---
@@ -102,63 +102,55 @@
 
 ### 2.1 依赖
 
-| 依赖 | 本机位置 | 说明 |
+| 依赖 | 位置 | 说明 |
 |---|---|---|
-| MinGW-w64 GCC | `D:\w64devkit\bin\gcc.exe`（GCC 16.2） | 编译 ScreenTime 与应用模块 |
-| AWTK 源码 + 已编译的动态库 | `D:\Work\AWTK\awtk-master`（构建目录 `build_mingw`） | 只**就地引用**头文件/导入库/资源，一个字节都不复制进本工作区 |
+| MinGW-w64 GCC | `D:\w64devkit\bin\gcc.exe`（GCC 16.2） | 编译 ScreenTime 与应用模块，也用于编译 AWTK |
+| AWTK 源码 | **`third_party\awtk`（git 子模块）** | `git clone` 后一行 `git submodule update --init --recursive` 就有，版本随仓库锁定 |
+| CMake + Ninja | `D:\w64devkit\bin\cmake.exe` / `ninja.exe` | 编译 AWTK 用（AWTK 自带 CMake 工程） |
+| Inno Setup 7 | `C:\Program Files\Inno Setup 7\ISCC.exe` | 只打安装包时用 |
 
 GCC / Win32 部分没有第三方依赖：GDI/GDI+ 截图存 PNG、WinHTTP 调模型、低级键鼠钩子、CNG（bcrypt）做密码哈希。
 
-### 2.2 先编译 AWTK（只需一次；`build_mingw` 已存在时可跳过）
-
-```powershell
-cmake -S D:\Work\AWTK\awtk-master -B D:\Work\AWTK\awtk-master\build_mingw -G Ninja `
-  -DCMAKE_C_COMPILER=D:/w64devkit/bin/gcc.exe -DCMAKE_CXX_COMPILER=D:/w64devkit/bin/g++.exe `
-  '-DAWTK_TOOLS_NAME=mingw' -DAWTK_DEBUG=OFF -DCMAKE_BUILD_TYPE=Release -DAWTK_BUILD_SHARED=ON `
-  -DAWTK_BUILD_DEMOS=OFF -DAWTK_BUILD_TESTS=OFF '-DAWTK_BUILD_CMAKE_FIND_DEMO=ON' `
-  '-DCMAKE_POLICY_VERSION_MINIMUM=3.10' '-DDIRECTX=OFF'
-cmake --build D:\Work\AWTK\awtk-master\build_mingw
-```
-
-产物：`build_mingw\awtk.dll`、`build_mingw\libawtk.dll.a`、`build_mingw\third_party\SDL2\SDL2.dll`。
-
-**没有 OpenGL 的机器（虚拟机 / 远程桌面 / "Microsoft 基本显示适配器"）跑不起来怎么办？**
-AWTK 默认用 OpenGL 渲染，这类机器上程序会在创建窗口那一步直接崩掉（日志停在
-`阶段：界面：tk_init`）。这种情况下改用**软件渲染**构建（nanovg AGGE，完全不碰显卡驱动）：
+### 2.2 编译 AWTK（两条命令，产物都在本仓库 `out\` 里）
 
 ```powershell
 cd D:\Work\ScreenTime
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build_awtk_soft.ps1
+git submodule update --init --recursive          # 首次：拉取 third_party\awtk
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_awtk.ps1 -Backend gl
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_awtk.ps1 -Backend soft
 ```
 
-这条命令把 AWTK 编到工作区里的 `out\awtk_soft\`（**不动** `build_mingw`），之后：
+产物：`out\awtk_gl\awtk.dll`（OpenGL 版）、`out\awtk_soft\awtk.dll`（软件渲染版），
+各带 `libawtk.dll.a` 与 `third_party\SDL2\SDL2.dll`。**构建输出不写进子模块**，所以
+`third_party\awtk` 只会因为下面那一行 CMake 补丁而显示"modified"。
+
+**为什么要打补丁**：AWTK 的 CMake 移植漏掉了 `src/lcd/lcd_sdl2.c`（它自己的 SCons 构建会编译这个文件），
+而软件渲染（`AWTK_NANOVG_BACKEND=AGGE`）链接时正需要 `lcd_sdl2_init` / `lcd_sdl2_texture_reset`。
+`patches\awtk-cmake-lcd-sdl2.patch` 把它加进 `_base_src`，`build_awtk.ps1` 会自动应用（幂等，已应用则跳过）。
+这一行对 GL 版无害（SDL2 本来就是依赖）。想还原子模块：
 
 ```powershell
-# 编程序（软件渲染后端）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Backend soft -Out out\soft\ScreenTime.exe
-# 打软件渲染安装包 -> dist\ScreenTimeSetup-<版本>-soft.exe
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1 -Backend soft -PayloadExe out\soft\ScreenTime.exe
+git -C third_party\awtk checkout -- cmake/src_libs.cmake
 ```
 
-说明：AWTK 的 CMake 移植漏掉了 `src/lcd/lcd_sdl2.c`（SCons 会自动带上），所以 AGGE 构建
-会在最后链接时缺 `lcd_sdl2_init` / `lcd_sdl2_texture_reset`。`build_awtk_soft.ps1` 会自动调用
-`fix_awtk_soft_link.ps1`：单独编译那个源文件、再用同样的命令重新链接 `awtk.dll`
-（**不修改 AWTK 源码**）。软件渲染版本不申请高分屏标志，AWTK 报的缩放是 1.00，
-所以在 125% 缩放的屏幕上界面会比 GL 版小一圈（但清晰、不模糊）——主力机还是用 GL 版。
+`-Reconfigure` 可清空构建目录重来。两个后端只在 `AWTK_NANOVG_BACKEND` 上不同（`GL3` / `AGGE`）；
+软件渲染版不申请高分屏标志，AWTK 报的缩放是 1.00，所以在 125% 缩放的屏幕上界面会比 GL 版小一圈
+（但清晰、不模糊）——主力机用 GL 版。安装包默认把两套都带上，由启动器运行时自动选（见 §3）。
 
 ### 2.3 编译 ScreenTime
 
 ```powershell
 cd D:\Work\ScreenTime
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1                     # GL 后端（默认）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Backend soft -Out out\soft\ScreenTime.exe
 ```
 
-`build.ps1` 会 dot-source `awtk_env.ps1`（里面写死了 AWTK 的头文件目录、30 个 `WITH_*` 编译宏、导入库路径，
-宏列表与 `build_mingw\build.ninja` 里 awtk 目标的一致，保证与 `awtk.dll` 的 ABI 对得上），然后用 gcc 编译 `src\*.c`。
+`build.ps1` 会 dot-source `awtk_env.ps1`：它按 `$env:AWTK_BACKEND`（`gl` 默认 / `soft`）选
+`out\awtk_gl` 或 `out\awtk_soft`，并**从该构建的 `build.ninja` 解析**头文件目录与 `-D` 宏，
+所以编译宏永远和对应 `awtk.dll` 的 ABI 一致（不再手工维护宏列表），然后用 gcc 编译 `src\*.c`。
 
-编译宏里包含 `-DAWTK_RES_ROOT="D:/Work/AWTK/awtk-master/res"`（正斜杠）；程序启动时优先用
-**exe 同级目录** 的 `res\assets\default\raw\styles\default.bin`，找不到才回退到这个开发路径——
-所以开发时直接在工作区跑 exe 也能正常加载主题。
+编译宏里包含 `-DAWTK_RES_ROOT="<仓库>/third_party/awtk/res"`（正斜杠）；程序启动时优先用
+**exe 同级目录** 的 `res\assets\default\raw\styles\default.bin`，找不到才回退到这条开发路径。
 
 调试版（把密码校验的中间量写进日志，排查用，平时不要开）：
 
@@ -166,14 +158,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Extra '-DST_PWDEBUG'
 ```
 
-> 运行前需要让系统能找到 `awtk.dll` / `SDL2.dll`。开发时用 `run.ps1`（自动把 AWTK 构建目录加进 PATH）：
+> 运行前需要让系统能找到 `awtk.dll` / `SDL2.dll`。开发时用 `run.ps1`（自动把对应 AWTK 构建目录加进 PATH）：
 > ```powershell
 > powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1
 > powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 -Extra '--config','D:\path\my.ini'
 > ```
-> 等价的手工做法：
+> 等价的手工做法（GL 后端为例）：
 > ```powershell
-> $env:PATH = 'D:\Work\AWTK\awtk-master\build_mingw;D:\Work\AWTK\awtk-master\build_mingw\third_party\SDL2;' + $env:PATH
+> $env:PATH = 'D:\Work\ScreenTime\out\awtk_gl;D:\Work\ScreenTime\out\awtk_gl\third_party\SDL2;' + $env:PATH
 > .\ScreenTime.exe
 > ```
 > 安装后的版本把这两个 DLL 复制到 exe 旁边，就不需要改 PATH。
@@ -395,8 +387,8 @@ logs\activity.jsonl                        # 机读：JSON 行，便于统计
 * 单实例：重复启动不会开第二份，而是让已运行实例显示窗口。
 * 界面依赖 `awtk.dll`（6.1 MB）与 `SDL2.dll`（1.9 MB）：**必须和 exe 放在一起**，
   另外 exe 同级要有 `res\assets\default\raw\styles\default.bin`；开发时若不复制资源，
-  程序会回退到编译期写死的 `D:/Work/AWTK/awtk-master/res`。中文字体从系统字体目录读，不打包。
-* **`awtk.dll` 有两种，不能混用**：GL 版（`build_mingw`）需要可用的 OpenGL 3；
+  程序会回退到编译期写死的 `<仓库>/third_party/awtk/res`（由 `build.ps1` 按当前检出路径传入）。中文字体从系统字体目录读，不打包。
+* **`awtk.dll` 有两种，不能混用**：GL 版（`out\awtk_gl`）需要可用的 OpenGL 3；
   软件渲染版（`out\awtk_soft`）不依赖任何图形驱动，但没有高分屏缩放（AWTK 报 1.00）。
   装错包的表现是：要么启动即崩（日志停在 `阶段：界面：tk_init`），要么界面在 125% 屏上偏小。
 * 模型不可达时只记日志（`请求失败（无法连接或超时）`），不影响锁屏计时。
@@ -412,8 +404,9 @@ VERSION           版本号（安装包与程序内显示都用它）
 build.ps1         gcc 编译 src\*.c -> ScreenTime.exe（-Out 指定输出路径，-Backend gl|soft 选渲染后端）
 run.ps1           开发时运行工作区的 exe（把 AWTK 构建目录加进 PATH）
 awtk_env.ps1      AWTK 头文件目录 / 编译宏 / 导入库路径（从所选构建的 build.ninja 自动解析，保证 ABI 一致）
-build_awtk_soft.ps1   用软件渲染（nanovg AGGE）把 AWTK 编到 out\awtk_soft（给没有 OpenGL 的机器）
-fix_awtk_soft_link.ps1  补上 AWTK CMake 漏掉的 src\lcd\lcd_sdl2.c 并重新链接 awtk.dll（被上一个脚本自动调用）
+build_awtk.ps1         编译 AWTK（-Backend gl|soft 各一棵，产物在 out\awtk_gl、out\awtk_soft），
+                       并自动应用 patches\ 下的 CMake 补丁
+patches\awtk-cmake-lcd-sdl2.patch  给 AWTK 的 CMake 补上 src\lcd\lcd_sdl2.c（软件渲染构建需要）
 launcher\launcher.c   启动器源码：探测 OpenGL 后拉起 gl\ 或 soft\ 后端（自适应安装包用）
 build_launcher.ps1    编译启动器 -> out\launcher\ScreenTime.exe
 installer\        Inno Setup 7 安装包：ScreenTime.iss（UTF-8 带 BOM）+ make_installer.ps1（纯 ASCII 打包脚本）+ README.md
@@ -539,7 +532,9 @@ git add -A; git commit -m "..."  # 提交
 其它约定：
 
 * `legacy\config.ini` 已从仓库移除（旧版程序首次运行会自己生成），磁盘上那份如果还在也可以直接删。
-* **AWTK 不进仓库**：`awtk_env.ps1` 里写的是绝对路径 `D:\Work\AWTK\awtk-master`，就地引用其头文件/导入库/资源；
+* **AWTK 以 git 子模块引入**：`third_party\awtk`（`git submodule update --init --recursive` 拉取，
+  gitlink 锁定了具体提交）；两棵构建树在 `out\awtk_gl` / `out\awtk_soft`（已被 `.gitignore` 忽略），
+  子模块本身只会因为我们那一个 CMake 补丁（`patches\`）显示 modified；
   换机器时改这一个文件、或把 AWTK 源码放在同样的路径即可（详见 §2）。
 * `.gitattributes` 统一用 LF 存文本、并把 `*.exe/*.dll/*.png/*.dat/*.zip` 标成二进制，
   避免 Windows/Linux 之间把行尾改来改去、也让 diff 不去碰二进制。

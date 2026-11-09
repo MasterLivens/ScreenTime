@@ -53,14 +53,15 @@ $PayloadDir   = Split-Path -Parent $PayloadExe
 
 $IsccExe      = 'C:\Program Files\Inno Setup 7\ISCC.exe'
 $SevenZipExe  = 'C:\Program Files\7-Zip\7z.exe'
-$AwtkRoot     = 'D:\Work\AWTK\awtk-master'
+# AWTK is the git submodule third_party\awtk; both backends are built into out\.
+$AwtkRoot     = Join-Path $ProjectRoot 'third_party\awtk'
 
 # 'auto' bundles BOTH backends + the launcher:
 #   {app}\ScreenTime.exe        <- launcher (probes OpenGL, picks a backend)
 #   {app}\gl\ScreenTime.exe     <- AWTK OpenGL build
 #   {app}\soft\ScreenTime.exe   <- AWTK software-renderer build
 $AutoBundle = ($Backend -eq 'auto')
-$GlBuildDir = Join-Path $AwtkRoot 'build_mingw'
+$GlBuildDir = Join-Path $ProjectRoot 'out\awtk_gl'
 $SoftBuildDir = Join-Path $ProjectRoot 'out\awtk_soft'
 
 if ($AutoBundle) {
@@ -73,7 +74,7 @@ if ($AutoBundle) {
     . (Join-Path $ProjectRoot 'awtk_env.ps1')
 }
 
-$DefaultVersion = '1.1.8'
+$DefaultVersion = '1.1.9'
 $ScaleDirs      = @('x1', 'x2', 'x3', 'x4')
 
 # ---------------------------------------------------------------------------
@@ -227,7 +228,7 @@ if ($AutoBundle) {
     Write-Step 'Preparing bundle (launcher + gl + soft backends)'
 
     if (-not (Test-Path -LiteralPath (Join-Path $SoftBuildDir 'awtk.dll') -PathType Leaf)) {
-        Stop-Build ("software AWTK build missing: {0}\awtk.dll (run .\build_awtk_soft.ps1 first)" -f $SoftBuildDir)
+        Stop-Build ("software AWTK build missing: {0}\awtk.dll (run .\build_awtk.ps1 -Backend soft first)" -f $SoftBuildDir)
     }
     if (-not (Test-Path -LiteralPath (Join-Path $GlBuildDir 'awtk.dll') -PathType Leaf)) {
         Stop-Build ("OpenGL AWTK build missing: {0}\awtk.dll" -f $GlBuildDir)

@@ -34,7 +34,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.p
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.ps1 -Backend soft -PayloadExe out\soft\ScreenTime.exe
 ```
 
-`-Backend auto` 需要 `out\awtk_soft\awtk.dll`（先跑 `.\build_awtk_soft.ps1`）。
+`-Backend auto` 需要 `out\awtk_soft\awtk.dll`（先跑 `.\build_awtk.ps1 -Backend soft`）。
 三种包的 `AppId` 相同、都装到同一目录，所以互相覆盖安装就是普通升级，个人数据不受影响；
 `.iss` 的 `[InstallDelete]` 会顺手清掉另一种布局的残留（根目录的 `awtk.dll`/`res`，或 `gl\`/`soft\`）。
 
@@ -61,13 +61,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_installer.p
 7. 打绿色包（`Compress-Archive`），并列出压缩包里的条目；
 8. 打印产物完整路径、大小，最后一行打印**可直接复制的 ISCC 命令**。
 
-等价的 ISCC 命令（版本 1.1.2 时）：
+等价的 ISCC 命令（版本 1.1.8 时；AWTK 是仓库里的子模块，两棵构建树在 out\）：
 
 ```powershell
 & 'C:\Program Files\Inno Setup 7\ISCC.exe' `
-    /DAppVersion=1.1.2 /DAppVersion4=1.1.2.0 `
+    /DAppVersion=1.1.8 /DAppVersion4=1.1.8.0 `
     /DPayloadDir=D:\Work\ScreenTime `
-    /DAwtkDir=D:\Work\AWTK\awtk-master `
+    /DAwtkDir=D:\Work\ScreenTime\third_party\awtk `
+    /DAwtkBuild=D:\Work\ScreenTime\out\awtk_gl `
     /OD:\Work\ScreenTime\dist `
     D:\Work\ScreenTime\installer\ScreenTime.iss
 ```
