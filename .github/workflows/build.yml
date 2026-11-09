@@ -1,0 +1,173 @@
+# =============================================================================
+#  CI: build AWTK on Windows / Linux / macOS, and build the app on Windows.
+#
+#  Why the app is only built on Windows:
+#    AWTK itself is cross-platform and lives in the third_party/awtk submodule, so
+#    the `awtk` job really does compile it on all three OSes (with our one-line
+#    CMake patch applied by build_awtk.ps1). The ScreenTime *application* layer is
+#    still Win32-specific (GDI+ capture, WinHTTP, low-level input hooks, tray,
+#    registry, CNG hashing, WASAPI/PDH media detection), so it cannot compile on
+#    Linux/macOS yet -- see README section 10 for the port plan. Instead of making
+#    the pipeline lie, the app job runs on Windows only.
+# =============================================================================
+
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # AWTK library (the really cross-platform part): same submodule, same script,
+  # software renderer (AGGE) so no GPU/OpenGL is needed on the runners.
+  # ---------------------------------------------------------------------------
+  awtk:
+    name: awtk (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install ninja + SDL2 build deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build libasound2-dev libpulse-dev libudev-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxinerama-dev
+
+      - name: Install ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Install toolchain (Windows / MSYS2)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+
+      - name: Put MSYS2 mingw64 on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Tool versions
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          gcc --version
+
+      - name: Build AWTK (software renderer)
+        shell: pwsh
+        run: ./build_awtk.ps1 -Backend soft
+
+      - name: Upload AWTK build
+        uses: actions/upload-artifact@v4
+        with:
+          name: awtk-soft-${{ matrix.os }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            out/awtk_soft/awtk.dll
+            out/awtk_soft/libawtk.so
+            out/awtk_soft/libawtk.dylib
+            out/awtk_soft/build.ninja
+            out/awtk_soft/third_party/SDL2/*.dll
+            out/awtk_soft/third_party/SDL2/*.so*
+            out/awtk_soft/third_party/SDL2/*.dylib
+
+  # ---------------------------------------------------------------------------
+  # The application itself: Windows only (see the note at the top).
+  # Builds both renderer backends + the launcher, then uploads them.
+  # ---------------------------------------------------------------------------
+  app-windows:
+    name: 'app (windows: gl + soft + launcher)'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain (MSYS2)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+
+      - name: Put MSYS2 mingw64 on PATH
+        shell: pwsh
+        run: |
+          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Build AWTK (OpenGL backend)
+        shell: pwsh
+        run: ./build_awtk.ps1 -Backend gl
+
+      - name: Build AWTK (software backend)
+        shell: pwsh
+        run: ./build_awtk.ps1 -Backend soft
+
+      - name: Build ScreenTime (both backends) + launcher
+        shell: pwsh
+        run: |
+          ./build.ps1 -Backend gl   -Out out/gl/ScreenTime.exe
+          ./build.ps1 -Backend soft -Out out/soft/ScreenTime.exe
+          ./build_launcher.ps1
+
+      - name: Smoke test (best effort; runner has no interactive desktop)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 'smoke'
+          New-Item -ItemType Directory -Force -Path $t | Out-Null
+          Copy-Item out/gl/ScreenTime.exe $t
+          Copy-Item out/awtk_gl/awtk.dll $t
+          Copy-Item out/awtk_gl/third_party/SDL2/SDL2.dll $t
+          $res = Join-Path $t 'res/assets/default/raw/styles'
+          New-Item -ItemType Directory -Force -Path $res | Out-Null
+          Copy-Item 'third_party/awtk/res/assets/default/raw/styles/default.bin' $res
+          Start-Process -FilePath (Join-Path $t 'ScreenTime.exe') -WorkingDirectory $t
+          Start-Sleep -Seconds 10
+          if (Test-Path (Join-Path $t 'logs/activity.log')) {
+            Get-Content (Join-Path $t 'logs/activity.log') -Tail 25
+          } else {
+            Write-Host 'no activity.log produced (runner may lack a desktop session)'
+          }
+          Get-Process ScreenTime -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Upload ScreenTime build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScreenTime-windows
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            out/launcher/ScreenTime.exe
+            out/gl/ScreenTime.exe
+            out/soft/ScreenTime.exe
+            out/awtk_gl/awtk.dll
+            out/awtk_gl/libawtk.dll.a
+            out/awtk_gl/third_party/SDL2/SDL2.dll
+            out/awtk_soft/awtk.dll
+            out/awtk_soft/libawtk.dll.a
+            out/awtk_soft/third_party/SDL2/SDL2.dll

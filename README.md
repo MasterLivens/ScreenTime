@@ -540,3 +540,31 @@ git add -A; git commit -m "..."  # 提交
   避免 Windows/Linux 之间把行尾改来改去、也让 diff 不去碰二进制。
 * 从零开始恢复构建环境：装 MinGW-w64（`D:\w64devkit`）→ 按 §2.2 编译 AWTK → `git clone` 本仓库 →
   `.\build.ps1` 编译 → `.\install.ps1` 安装（或直接用 `dist\ScreenTimeSetup-<版本>.exe` 安装）。
+
+## 10. CI 与跨平台现状
+
+`.github/workflows/build.yml` 有两条流水线：
+
+| job | 跑在哪 | 做什么 |
+|---|---|---|
+| `awtk` | **ubuntu / macos / windows 三平台矩阵** | 拉子模块 → `build_awtk.ps1 -Backend soft` 编出 AWTK（AGGE 软件渲染，不依赖显卡）→ 上传 `awtk.dll` / `libawtk.so` / `libawtk.dylib` |
+| `app-windows` | windows-latest（MSYS2 mingw64） | 编 GL + 软渲染两套 AWTK → 编两套程序 + 启动器 → 冒烟测试（容错）→ 上传产物 |
+
+**为什么程序只在 Windows 上编**：AWTK 本身是跨平台的（CI 里的 `awtk` job 就是证据），但本项目的
+**平台层是 Win32 专用的**，目前没有任何 `#ifdef` 抽象：
+
+| 模块 | Windows 依赖 | 移植到 Linux/macOS 需要 |
+|---|---|---|
+| `ui_awtk.c`（70 KB） | `SetWindowPos`/`FindWindowW`/托盘 `Shell_NotifyIcon`/`ClipCursor`/CBT 钩子 | X11/Wayland 或 Cocoa 的窗口与托盘（或改成纯 AWTK 内嵌托盘） |
+| `capture.c` | GDI `BitBlt` + GDI+ 存 PNG | X11 `XGetImage`/PipeWire、macOS `CGWindowListCreateImage` |
+| `hooks.c` | `WH_KEYBOARD_LL`/`WH_MOUSE_LL` | X11/evdev 输入监听、macOS `CGEventTap` |
+| `config.c`/`crypt.c` | CNG `BCrypt`（AES/PBKDF2）、注册表/隐藏属性 | OpenSSL（或 AWTK 已带的 mbedtls）+ POSIX 权限位 |
+| `passwd.c` | `BCryptDeriveKeyPBKDF2` | 同上（mbedtls 有 PBKDF2） |
+| `vision.c` | WinHTTP | libcurl |
+| `media.c` | WASAPI/PDH（检测视频播放） | PulseAudio/CoreAudio + 窗口全屏检测 |
+| `main.c`/`logger.c`/`util.c` | `CreateMutexW`/`_beginthreadex`/`GetTickCount64` | pthreads + `clock_gettime`，文件 API 基本可移植 |
+
+粗算：**255 处 Win32 调用点、10 个 Windows 链接库、零平台抽象**。所以"Linux/macOS 编译通过"不是加个
+CI 就能得到的，需要先做一层 `src/platform/` 抽象（分模块替换，CI 用矩阵守住每步）。这次先把 CI 建好、
+把 AWTK 的三平台构建固化下来，程序端的移植可以作为下一个阶段单独做——要做的话按上面的表逐模块推进，
+每完成一个就把对应平台加进 `app-*` job 的矩阵。
